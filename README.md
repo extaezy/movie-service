@@ -19,3 +19,4 @@ frontend/      React, TypeScript, Vite
 docs/          проектная документация
 ```
 
+Test

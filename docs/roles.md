@@ -2,7 +2,7 @@
 
 | Участник | GitHub | Роль | Зона ответственности |
 |----------|--------|------|----------------------|
-| Имя Фамилия 1 | [@username1](https://github.com/username1) | Роль 1 | Задачи участника 1 |
-| Имя Фамилия 2 | [@username2](https://github.com/username2) | Роль 2 | Задачи участника 2 |
-| Имя Фамилия 3 | [@username3](https://github.com/username3) | Роль 3 | Задачи участника 3 |
-| Имя Фамилия 4 | [@username4](https://github.com/username4) | Роль 4 | Задачи участника 4 |
+| Имя Фамилия 1 | [@EdyardGem](https://github.com/EdyardGem) | Руководитель проекта, Администратор баз данных, Аналитик
+| Имя Фамилия 2 | [@username2](https://github.com/username2) | Роль 2 
+| Имя Фамилия 3 | [@username3](https://github.com/username3) | Роль 3 
+| Имя Фамилия 4 | [@username4](https://github.com/username4) | Роль 4 

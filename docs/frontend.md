@@ -14,6 +14,8 @@
 | `/friends` | Друзья и заявки | авторизованный |
 | `/admin` | Администрирование | admin |
 
+Страницы профиля и списков показывают только данные, разрешённые сервером для текущего пользователя. Интерфейс не заменяет серверную проверку прав.
+
 ## Компоненты
 
 `AppLayout`, `Header`, `SearchBar`, `MovieCard`, `MovieGrid`, `MovieFilters`, `Pagination`, `MovieHero`, `RatingSummary`, `CriticReviewList`, `UserReviewList`, `ProfileHeader`, `ProfileTabs`, `PrivacyNotice`, `AuthForm`, `ProfileForm`, `RatingForm`, `ReviewForm`, `FriendRequestList`, `FriendButton`, `AdminSyncPanel`.
@@ -21,6 +23,8 @@
 ## Состояния
 
 Каждая страница должна иметь `loading`, `success`, `empty`, `error`. Для мутаций кнопка блокируется на время запроса и показывает ошибку.
+
+При отказе запроса интерфейс показывает понятное сообщение. Типы запросов и ответов должны соответствовать `docs/api.md`.
 
 ## Клиентская модель
 
@@ -57,4 +61,3 @@
 [Аватар] [Имя] [описание] [Добавить в друзья]
 [Рецензии] [Хочу посмотреть] [Просмотрено] [Избранное]
 ```
-

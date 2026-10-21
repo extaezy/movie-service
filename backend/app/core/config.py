@@ -1,2 +1,14 @@
-APP_NAME = "IT Management API"
-APP_VERSION = "0.1.0"
+APP_NAME = "MOVIE_SERVICE"
+APP_VERSION = "1.0.0"
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    database_url: str
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
+
+settings = Settings()

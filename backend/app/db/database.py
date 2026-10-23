@@ -11,7 +11,10 @@ from app.core.config import settings
 
 engine = create_async_engine(
     settings.database_url,
-    echo=True,
+    connect_args={"ssl": "require"},
+    pool_pre_ping=True,
+    pool_size=3,
+    max_overflow=2,
 )
 
 async_session = async_sessionmaker(

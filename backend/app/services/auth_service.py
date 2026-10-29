@@ -1,57 +1,58 @@
+from fastapi import HTTPException
+
 from app.schemas.auth import UserRegister
 from app.core.security import hash_password
-from app.repositories.user_store import (
-    UserAlreadyExistsError,
-    create_user,
-    get_user_by_email,
-    get_user_by_username,
-)
-from fastapi import HTTPException, status
-from pydantic import EmailStr, TypeAdapter, ValidationError
-
-from app.schemas.auth import UserLogin
-from app.core.security import verify_password
-from app.core.tokens import create_access_token
 
 
-email_adapter = TypeAdapter(EmailStr)
-dummy_password_hash = hash_password("dummy-password-for-timing")
+users_db = {}
+
 
 def register_user(user: UserRegister):
+    if user.email in users_db:
+        raise HTTPException(
+            status_code=409,
+            detail="Email уже зарегистрирован"
+        )
+
+    for existing_user in users_db.values():
+        if existing_user["username"] == user.username:
+            raise HTTPException(
+                status_code=409,
+                detail="Никнейм уже занят"
+            )
+
     hashed_password = hash_password(user.password)
-    try:
-        create_user(user.username, str(user.email), hashed_password)
-    except UserAlreadyExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    users_db[user.email] = {
+        "username": user.username,
+        "email": user.email,
+        "hashed_password": hashed_password,
+    }
 
     return {
         "username": user.username,
         "email": user.email,
     }
 
-def authenticate_user(user: UserLogin):
-    if "@" in user.identifier:
-        try:
-            email = email_adapter.validate_python(user.identifier)
-        except ValidationError:
-            existing_user = None
-        else:
-            existing_user = get_user_by_email(str(email))
-    else:
-        existing_user = get_user_by_username(user.identifier)
+from fastapi import HTTPException, status
 
-    password_hash = (
-        existing_user["hashed_password"] if existing_user else dummy_password_hash
-    )
-    password_matches = verify_password(user.password, password_hash)
-    if existing_user is None or not password_matches:
+from app.schemas.auth import UserLogin
+from app.core.security import verify_password
+
+
+def authenticate_user(user: UserLogin):
+    existing_user = users_db.get(user.email)
+
+    if existing_user is None or not verify_password(
+        user.password,
+        existing_user["hashed_password"]
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный username/email или пароль",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Неверный email или пароль",
         )
 
     return {
-        "access_token": create_access_token(existing_user["id"]),
-        "token_type": "bearer",
+        "username": existing_user["username"],
+        "email": existing_user["email"],
     }

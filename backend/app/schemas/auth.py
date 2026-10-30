@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr, model_validator, Field
+from typing import Literal
 
 class UserRegister(BaseModel):
     username: str = Field(
@@ -21,6 +22,22 @@ class UserRegister(BaseModel):
             raise ValueError("Пароли не совпадают")
         return self
 
-class UserLogin(BaseModel):
+class UserRegisterResponse(BaseModel):
+    username: str
     email: EmailStr
-    password: str
+
+
+class UserLogin(BaseModel):
+    identifier: str = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+
+
+class CurrentUserResponse(BaseModel):
+    id: str
+    username: str
+    email: EmailStr

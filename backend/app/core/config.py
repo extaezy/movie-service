@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
 
     database_url: str
+    jwt_secret_key: SecretStr = Field(min_length=32)
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

@@ -1,11 +1,12 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
-
 from alembic import context
+from app.db.models import SCHEMA, Base
+from app.db.settings import DatabaseSettings, connection_options
+from sqlalchemy import pool, text
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,7 +21,18 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
+database_settings = DatabaseSettings()
+database_url, connect_args = connection_options(database_settings)
+
+
+def include_name(name, type_, parent_names):
+    if type_ == "schema":
+        return name == SCHEMA
+    if type_ == "table":
+        return parent_names.get("schema_name") == SCHEMA
+    return True
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -40,23 +52,50 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
+        include_name=include_name,
+        version_table_schema=SCHEMA,
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
+        context.execute(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"')
         context.run_migrations()
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
-
-    with context.begin_transaction():
-        context.run_migrations()
+    acquired = connection.execute(
+        text("SELECT pg_try_advisory_lock(81183, 1)")
+    ).scalar_one()
+    connection.commit()
+    if not acquired:
+        raise RuntimeError(
+            "Another Movie Service migration is running. Retry after it finishes."
+        )
+    try:
+        connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
+        connection.commit()
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_schemas=True,
+            include_name=include_name,
+            version_table_schema=SCHEMA,
+            compare_type=True,
+            compare_server_default=True,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+    finally:
+        connection.rollback()
+        connection.execute(text("SELECT pg_advisory_unlock(81183, 1)"))
+        connection.commit()
 
 
 async def run_async_migrations() -> None:
@@ -65,16 +104,18 @@ async def run_async_migrations() -> None:
 
     """
 
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    connectable = create_async_engine(
+        database_url,
+        connect_args=connect_args,
         poolclass=pool.NullPool,
+        hide_parameters=True,
     )
 
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
+    try:
+        async with connectable.connect() as connection:
+            await connection.run_sync(do_run_migrations)
+    finally:
+        await connectable.dispose()
 
 
 def run_migrations_online() -> None:

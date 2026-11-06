@@ -39,7 +39,7 @@ README.md
 
 - Backend: Python 3.13, FastAPI, SQLAlchemy 2, Alembic, Pydantic, HTTPX, APScheduler, pytest.
 - Frontend: React, TypeScript, Vite, React Router, Axios, Context API, CSS Modules или CSS.
-- Данные: PostgreSQL; локальный запуск допускает Docker Compose.
+- Данные: PostgreSQL в общем проекте Supabase либо локальный PostgreSQL в Docker Compose. Доступ к общей базе выполняет backend через Session pooler на порту 5432 с SSL. Таблицы приложения находятся в отдельной схеме `movie_service`; Supabase Auth и Data API для прикладных операций не используются.
 
 ## Модули
 

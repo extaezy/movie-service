@@ -1,19 +1,17 @@
-from pydantic import BaseModel, EmailStr, model_validator, Field
 from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+
 
 class UserRegister(BaseModel):
     username: str = Field(
-        min_length=4,
-        max_length=20,
-        pattern=r"^[a-zA-Z0-9]+(?:_[a-zA-Z0-9]+)*$"
+        min_length=4, max_length=20, pattern=r"^[a-zA-Z0-9]+(?:_[a-zA-Z0-9]+)*$"
     )
 
     email: EmailStr
 
-    password: str = Field(
-        min_length=8,
-        max_length=128
-    )
+    password: str = Field(min_length=8, max_length=128)
     password_confirm: str
 
     @model_validator(mode="after")
@@ -21,6 +19,7 @@ class UserRegister(BaseModel):
         if self.password != self.password_confirm:
             raise ValueError("Пароли не совпадают")
         return self
+
 
 class UserRegisterResponse(BaseModel):
     username: str
@@ -38,6 +37,8 @@ class TokenResponse(BaseModel):
 
 
 class CurrentUserResponse(BaseModel):
-    id: str
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
     username: str
     email: EmailStr

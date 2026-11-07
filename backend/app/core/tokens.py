@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from jwt.exceptions import InvalidTokenError
@@ -7,7 +7,7 @@ from app.core.config import settings
 
 
 def create_access_token(user_id: str) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return jwt.encode(
         {"sub": user_id, "iat": now, "exp": now + timedelta(minutes=30)},
         settings.jwt_secret_key.get_secret_value(),

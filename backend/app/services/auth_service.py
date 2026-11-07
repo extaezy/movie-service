@@ -5,7 +5,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.security import hash_password, verify_password
 from app.core.tokens import create_access_token
-from app.repositories.user_store import (
+from app.repositories.user_repository import (
     UserAlreadyExistsError,
     create_user,
     get_user_by_email,

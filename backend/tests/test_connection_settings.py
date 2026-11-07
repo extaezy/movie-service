@@ -1,7 +1,8 @@
 import pytest
+from pydantic import SecretStr
+
 from app.db.models import Base
 from app.db.settings import DatabaseSettings, connection_options
-from pydantic import SecretStr
 
 
 def test_supabase_url_preserves_encoded_password_and_ssl():

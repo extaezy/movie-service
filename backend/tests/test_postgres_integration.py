@@ -5,6 +5,10 @@ from uuid import uuid4
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
+
 from app.db.models import (
     Base,
     Critic,
@@ -18,9 +22,6 @@ from app.db.models import (
     UserMovieEntry,
     UserReview,
 )
-from sqlalchemy import select, text
-from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
 
 TEST_DATABASE_URL = os.getenv("MOVIE_SERVICE_TEST_DATABASE_URL")
 pytestmark = [

@@ -2,6 +2,7 @@ fastapi
 uvicorn
 sqlalchemy[asyncio]
 asyncpg
+httpx>=0.27,<1
 alembic
 pydantic-settings
 pydantic[email]

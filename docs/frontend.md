@@ -16,6 +16,8 @@
 
 Страницы профиля и списков показывают только данные, разрешённые сервером для текущего пользователя. Интерфейс не заменяет серверную проверку прав.
 
+Поиск вызывает `GET /movies/search?q=...&page=...`. При выборе результата frontend вызывает `GET /movies/tmdb/{tmdb_id}`, затем открывает `/movies/:id` с внутренним `id` полученной карточки. Прямая ссылка `/movies/:id` загружает `GET /movies/{id}`. Пока карточка сохраняется, отображается loading; при 404 — фильм не найден, при 502/503 — ошибка с повтором запроса. Поисковая выдача не содержит внутренних ID; её `tmdb_id` нельзя передавать в запросы оценок или списков.
+
 ## Компоненты
 
 `AppLayout`, `Header`, `SearchBar`, `MovieCard`, `MovieGrid`, `MovieFilters`, `Pagination`, `MovieHero`, `RatingSummary`, `CriticReviewList`, `UserReviewList`, `ProfileHeader`, `ProfileTabs`, `PrivacyNotice`, `AuthForm`, `ProfileForm`, `RatingForm`, `ReviewForm`, `FriendRequestList`, `FriendButton`, `AdminSyncPanel`.

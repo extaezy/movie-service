@@ -99,6 +99,179 @@ async def test_registration_commits_user_and_profile(client, database):
     assert logged_in.status_code == 200
 
 
+async def test_registration_requires_username(client, database):
+    payload = registration()
+    del payload["username"]
+
+    response = await client.post("/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert any(
+        error["loc"] == ["body", "username"] and error["type"] == "missing"
+        for error in response.json()["detail"]
+    )
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
+
+
+async def test_registration_requires_email(client, database):
+    payload = registration()
+    del payload["email"]
+
+    response = await client.post("auth/register", json = payload)
+
+    assert response.status_code == 422
+    assert any (
+        error["loc"] == ["body", "email"] and error["type"] == "missing"
+        for error in response.json()["detail"]
+    )
+
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
+
+@pytest.mark.parametrize("email", ["invalid-email", "name@", "@example.com"])
+async def test_registration_rejects_invalid_email(client, database, email):
+    payload = registration()
+    payload["email"] = email
+
+    response = await client.post("auth/register", json = payload)
+
+    assert response.status_code == 422
+    assert any(
+        error["loc"] == ["body", "email"]
+        for error in response.json()["detail"]
+    )
+
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
+
+@pytest.mark.parametrize("username", ["abc", "abcd", "a" * 20, "a" * 21])
+async def test_registration_validates_username_length(client, database, username):
+    payload = registration()
+    payload["username"] = username
+
+    response = await client.post("auth/register", json = payload)
+
+    if len(username) < 4 or len(username) > 20:
+        assert response.status_code == 422
+        assert any(
+            error["loc"] == ["body", "username"]
+            for error in response.json()["detail"]
+        )
+
+        async with database.sessions() as session:
+            assert (await session.scalars(select(User))).all() == []
+            assert (await session.scalars(select(Profile))).all() == []
+    else:
+        assert response.status_code == 201
+        assert response.json() == {
+            "username": username,
+            "email": payload["email"],
+        }
+
+        async with database.sessions() as session:
+            users = (await session.scalars(select(User))).all()
+            profiles = (await session.scalars(select(Profile))).all()
+
+            assert len(users) == 1
+            assert len(profiles) == 1
+
+            user = users[0]
+            profile = profiles[0]
+
+            assert user.username == username
+            assert user.email == payload["email"]
+            assert profile.user_id == user.id
+
+
+
+
+async def test_me_returns_token_owner(client, database):
+    first_user_data = registration()
+    second_user_data = registration()
+    second_user_data["username"] = "student_2"
+    second_user_data["email"] = "second@example.com"
+
+    first_registration = await client.post("/auth/register", json=first_user_data)
+    assert first_registration.status_code == 201
+
+    second_registration = await client.post("/auth/register", json=second_user_data)
+    assert second_registration.status_code == 201
+
+    first_login = await client.post(
+        "/auth/login",
+        json={
+            "identifier": first_user_data["username"],
+            "password": first_user_data["password"],
+        },
+    )
+    assert first_login.status_code == 200
+    first_token = first_login.json()["access_token"]
+
+    second_login = await client.post(
+        "/auth/login",
+        json={
+            "identifier": second_user_data["username"],
+            "password": second_user_data["password"],
+        },
+    )
+    assert second_login.status_code == 200
+    second_token = second_login.json()["access_token"]
+
+    first_me = await client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+    assert first_me.status_code == 200
+
+    second_me = await client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_me.status_code == 200
+
+    async with database.sessions() as session:
+        first_user = await session.scalar(
+            select(User).where(
+                User.username == first_user_data["username"]
+            )
+        )
+        second_user = await session.scalar(
+            select(User).where(
+                User.username == second_user_data["username"]
+            )
+        )
+
+        assert first_user is not None
+        assert second_user is not None
+
+        first_id = first_me.json()["id"]
+        second_id = second_me.json()["id"]
+
+        assert first_id != second_id
+
+        assert first_id == str(first_user.id)
+        assert second_id == str(second_user.id)
+
+        assert first_me.json() == {
+            "id": str(first_user.id),
+            "username": first_user_data["username"],
+            "email": first_user_data["email"],
+        }
+
+        assert second_me.json() == {
+            "id": str(second_user.id),
+            "username": second_user_data["username"],
+            "email": second_user_data["email"],
+        }
+
+
+
+
+
 @pytest.mark.parametrize("duplicate_field", ["username", "email"])
 async def test_duplicate_registration_is_conflict(client, database, duplicate_field):
     original = registration()

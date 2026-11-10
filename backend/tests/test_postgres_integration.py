@@ -1,3 +1,4 @@
+import asyncio
 import os
 from types import SimpleNamespace
 from uuid import uuid4
@@ -8,6 +9,7 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from app.db.models import (
     Base,
@@ -187,6 +189,229 @@ async def test_registration_validates_username_length(client, database, username
             assert profile.user_id == user.id
 
 
+@pytest.mark.parametrize("missing_field", ["password", "password_confirm"])
+async def test_registration_requires_password_fields(client, database, missing_field):
+    payload = registration()
+    endpoint = "/auth/register"
+    expected_status = 422
+    expected_location = ["body", missing_field]
+    expected_error_type = "missing"
+
+    del payload[missing_field]
+
+    response = await client.post(endpoint, json=payload)
+
+    assert response.status_code == expected_status
+    assert any(
+        error["loc"] == expected_location and error["type"] == expected_error_type
+        for error in response.json()["detail"]
+    )
+
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["username", "email", "password", "password_confirm"],
+)
+@pytest.mark.parametrize(
+    "invalid_value",
+    [None, {"value": "invalid"}],
+    ids=["null", "object"],
+)
+async def test_registration_rejects_invalid_field_types(
+    client, database, field_name, invalid_value
+):
+    payload = registration()
+    endpoint = "/auth/register"
+    expected_status = 422
+    expected_location = ["body", field_name]
+
+    payload[field_name] = invalid_value
+
+    response = await client.post(endpoint, json=payload)
+
+    assert response.status_code == expected_status
+    assert any(
+        error["loc"] == expected_location
+        for error in response.json()["detail"]
+    )
+
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
+
+
+@pytest.mark.parametrize(
+    ("username", "expected_status"),
+    [
+        ("abcd", 201),
+        ("qa_123", 201),
+        ("_abcd", 422),
+        ("abcd_", 422),
+        ("ab__cd", 422),
+        ("ab cd", 422),
+        ("тест", 422),
+    ],
+)
+async def test_registration_validates_username_format(
+    client, database, username, expected_status
+):
+    payload = registration()
+    endpoint = "/auth/register"
+    expected_location = ["body", "username"]
+
+    payload["username"] = username
+
+    response = await client.post(endpoint, json=payload)
+    assert response.status_code == expected_status
+
+    async with database.sessions() as session:
+        if expected_status == 201:
+            assert response.json() == {
+                "username": username,
+                "email": payload["email"],
+            }
+            users = (await session.scalars(select(User))).all()
+            profiles = (await session.scalars(select(Profile))).all()
+            assert len(users) == 1
+            assert len(profiles) == 1
+
+            user = users[0]
+            profile = profiles[0]
+
+            assert user.username == username
+            assert user.email == payload["email"]
+            assert profile.user_id == user.id
+        else:
+            assert any(
+                error["loc"] == expected_location
+                for error in response.json()["detail"]
+            )
+            assert (await session.scalars(select(User))).all() == []
+            assert (await session.scalars(select(Profile))).all() == []
+
+
+async def test_registration_treats_usernames_as_case_sensitive(client, database):
+    first_payload = registration()
+    second_payload = registration()
+    first_username = "qa_alpha"
+    second_username = "QA_ALPHA"
+    second_email = "second@example.com"
+    endpoint = "/auth/register"
+    expected_status = 201
+    expected_users_count = 2
+    expected_profiles_count = 2
+
+    first_payload["username"] = first_username
+    second_payload["username"] = second_username
+    second_payload["email"] = second_email
+
+    first_response = await client.post(endpoint, json=first_payload)
+    assert first_response.status_code == expected_status
+    second_response = await client.post(endpoint, json=second_payload)
+    assert second_response.status_code == expected_status
+    async with database.sessions() as session:
+        assert first_response.json() == {
+            "username": first_username,
+            "email": first_payload["email"],
+        }
+        assert second_response.json() == {
+            "username": second_username,
+            "email": second_email,
+        }
+        users = (await session.scalars(select(User))).all()
+        profiles = (await session.scalars(select(Profile))).all()
+        assert len(users) == expected_users_count
+        assert len(profiles) == expected_profiles_count
+        first_user = next(user for user in users if user.username == first_username)
+        second_user = next(user for user in users if user.username == second_username)
+        first_profile = next(
+            profile for profile in profiles if profile.user_id == first_user.id
+        )
+        second_profile = next(
+            profile for profile in profiles if profile.user_id == second_user.id
+        )
+        assert first_user.id != second_user.id
+        assert first_user.email == first_payload["email"]
+        assert second_user.email == second_payload["email"]
+        assert first_profile.user_id == first_user.id
+        assert second_profile.user_id == second_user.id
+
+
+@pytest.mark.parametrize("duplicate_field", ["username", "email"])
+async def test_concurrent_registration_rejects_duplicates(
+    client, database, duplicate_field
+):
+    first_payload = registration()
+    second_payload = registration()
+    second_username = "student_2"
+    second_email = "second@example.com"
+    endpoint = "/auth/register"
+    expected_statuses = [201, 409]
+    expected_users_count = 1
+    expected_profiles_count = 1
+
+    second_payload["username"] = second_username
+    second_payload["email"] = second_email
+    second_payload[duplicate_field] = first_payload[duplicate_field]
+
+    first_response, second_response = await asyncio.gather(
+        client.post(endpoint, json=first_payload),
+        client.post(endpoint, json=second_payload),
+    )
+    assert sorted([first_response.status_code, second_response.status_code]) == expected_statuses
+    async with database.sessions() as session:
+        if first_response.status_code == 201:
+            successful_payload = first_payload
+            successful_response = first_response
+        else:
+            successful_payload = second_payload
+            successful_response = second_response
+        assert successful_response.json() == {
+            "username": successful_payload["username"],
+            "email": successful_payload["email"],
+        }
+        users = (await session.scalars(select(User))).all()
+        profiles = (await session.scalars(select(Profile))).all()
+        assert len(users) == expected_users_count
+        assert len(profiles) == expected_profiles_count
+        user = users[0]
+        profile = profiles[0]
+        assert user.username == successful_payload["username"]
+        assert user.email == successful_payload["email"]
+        assert profile.user_id == user.id
+
+
+async def test_registration_rolls_back_when_profile_creation_fails(
+    client, database, monkeypatch
+):
+    payload = registration()
+    endpoint = "/auth/register"
+    expected_status = 503
+    profile_creation_user_ids = []
+    error_message = "Simulated profile creation timeout"
+
+    def fail_profile_creation(*, user_id):
+        profile_creation_user_ids.append(user_id)
+        raise SQLAlchemyTimeoutError(error_message)
+
+    monkeypatch.setattr(
+        "app.repositories.user_repository.Profile",
+        fail_profile_creation
+    )
+
+    response = await client.post(endpoint, json=payload)
+    assert response.status_code == expected_status
+
+    assert len(profile_creation_user_ids) == 1
+    assert profile_creation_user_ids[0] is not None
+
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
 
 
 async def test_me_returns_token_owner(client, database):
@@ -267,10 +492,6 @@ async def test_me_returns_token_owner(client, database):
             "username": second_user_data["username"],
             "email": second_user_data["email"],
         }
-
-
-
-
 
 @pytest.mark.parametrize("duplicate_field", ["username", "email"])
 async def test_duplicate_registration_is_conflict(client, database, duplicate_field):

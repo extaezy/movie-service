@@ -116,11 +116,15 @@ PK — первичный ключ, FK — ссылка. Обязательно�
 | `poster_path` | `TEXT` | нет | — |
 | `runtime` | `INTEGER` | нет | — |
 | `original_language` | `VARCHAR(10)` | нет | — |
+| `tmdb_vote_average` | `NUMERIC(5,3)` | нет | Средняя оценка TMDB |
+| `tmdb_vote_count` | `INTEGER` | нет | Число голосов TMDB |
+| `tmdb_rating_updated_at` | `TIMESTAMP WITH TIME ZONE` | нет | Время записи рейтинга TMDB |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | да | по умолчанию `now()` |
 
 - CHECK: `char_length(btrim(title)) > 0`.
 - CHECK: `runtime IS NULL OR runtime > 0`.
 - CHECK: `tmdb_id > 0`.
+- CHECK: `tmdb_vote_average BETWEEN 0 AND 10`, `tmdb_vote_count >= 0`. При отсутствии голосов средняя оценка равна `NULL`.
 - UNIQUE: `tmdb_id`.
 - Дополнительные индексы: `release_date`.
 
@@ -292,5 +296,7 @@ PK — первичный ключ, FK — ссылка. Обязательно�
 ## Миграции
 
 Начальная ревизия: `20261101_0001`. История: `movie_service.alembic_version`. Env Alembic создаёт служебную схему при необходимости; миграция создаёт предметные таблицы. Откат удаляет предметные таблицы, оставляя схему и инфраструктуру Alembic.
+
+Ревизия `20261113_0002` добавляет три поля рейтинга TMDB в `movie_service.movies`. Для существующих карточек поля остаются `NULL`. Откат этой ревизии удаляет эти поля и сохранённые в них значения.
 
 Автогенерация ограничена схемой movie_service. Используются Direct connection или Session pooler, не Transaction pooler. PostgreSQL session advisory lock предотвращает одновременное выполнение миграций. Применённые миграции не редактируются; изменения оформляются новыми ревизиями и проверяются на отдельной тестовой базе.

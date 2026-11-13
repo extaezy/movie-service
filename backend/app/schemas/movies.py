@@ -1,6 +1,9 @@
-from datetime import date
+from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+MovieSort = Literal["release_date_asc", "release_date_desc"]
 
 
 class GenreResponse(BaseModel):
@@ -24,3 +27,19 @@ class MovieResponse(BaseModel):
     runtime: int | None
     original_language: str | None
     genres: list[GenreResponse] = Field(default_factory=list)
+
+
+class MovieDetailResponse(MovieResponse):
+    average_rating: float | None
+    ratings_count: int
+    tmdb_vote_average: float | None
+    tmdb_vote_count: int | None
+    tmdb_rating_updated_at: datetime | None
+
+
+class MoviePage(BaseModel):
+    page: int
+    page_size: int
+    total_results: int
+    total_pages: int
+    results: list[MovieResponse]

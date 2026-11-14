@@ -1,11 +1,56 @@
 from uuid import UUID
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import UserReview
-from app.schemas.reviews import ReviewUpdate
+from app.db.models import User, UserReview
+from app.schemas.reviews import PublicReviewResponse, ReviewPage, ReviewUpdate
+
+REVIEW_PAGE_SIZE = 10
+
+
+async def list_movie_reviews(
+    session: AsyncSession, movie_id: int, *, page: int
+) -> ReviewPage:
+    movie_filter = UserReview.movie_id == movie_id
+    total_results = (
+        await session.scalar(
+            select(func.count()).select_from(UserReview).where(movie_filter)
+        )
+        or 0
+    )
+    offset = (page - 1) * REVIEW_PAGE_SIZE
+    review_page = ReviewPage(
+        page=page,
+        page_size=REVIEW_PAGE_SIZE,
+        total_results=total_results,
+        total_pages=(total_results + REVIEW_PAGE_SIZE - 1) // REVIEW_PAGE_SIZE,
+        results=[],
+    )
+    if offset >= total_results:
+        return review_page
+
+    statement = (
+        select(
+            UserReview.id,
+            UserReview.movie_id,
+            UserReview.text,
+            UserReview.contains_spoilers,
+            UserReview.created_at,
+            User.username.label("author_username"),
+        )
+        .join(User, User.id == UserReview.user_id)
+        .where(movie_filter)
+        .order_by(UserReview.created_at.desc(), UserReview.id.desc())
+        .offset(offset)
+        .limit(REVIEW_PAGE_SIZE)
+    )
+    result = await session.execute(statement)
+    review_page.results = [
+        PublicReviewResponse.model_validate(row) for row in result.mappings()
+    ]
+    return review_page
 
 
 async def create_review(

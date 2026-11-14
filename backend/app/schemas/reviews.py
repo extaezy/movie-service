@@ -49,3 +49,15 @@ class ReviewResponse(BaseModel):
 
 class ReviewUpdateResponse(ReviewResponse):
     updated_at: datetime
+
+
+class PublicReviewResponse(ReviewResponse):
+    author_username: str
+
+
+class ReviewPage(BaseModel):
+    page: int
+    page_size: int
+    total_results: int
+    total_pages: int
+    results: list[PublicReviewResponse]

@@ -19,10 +19,8 @@ from app.repositories.movie_repository import (
     save_movie,
 )
 from app.repositories.rating_repository import delete_rating, upsert_rating
-from app.repositories.review_repository import create_review
 from app.schemas.movies import MovieDetailResponse, MoviePage, MovieSort
 from app.schemas.ratings import RatingResponse, RatingUpdate
-from app.schemas.reviews import ReviewCreate, ReviewResponse
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 MovieId = Annotated[int, Path(ge=1, le=2147483647)]
@@ -115,30 +113,3 @@ async def delete_movie_rating(
     await delete_rating(session, user.id, movie_id)
     await session.commit()
     return Response(status_code=204)
-
-
-@router.post("/{movie_id}/reviews", status_code=201, response_model=ReviewResponse)
-async def post_movie_review(
-    movie_id: MovieId,
-    review: ReviewCreate,
-    user: CurrentUser,
-    session: DatabaseSession,
-) -> ReviewResponse:
-    if (
-        await session.get(
-            Movie, movie_id, with_for_update={"read": True, "key_share": True}
-        )
-        is None
-    ):
-        raise HTTPException(404, "Фильм не найден")
-    created_review = await create_review(
-        session,
-        user_id=user.id,
-        movie_id=movie_id,
-        text=review.text,
-        contains_spoilers=review.contains_spoilers,
-    )
-    if created_review is None:
-        raise HTTPException(409, "Вы уже написали рецензию на этот фильм")
-    await session.commit()
-    return ReviewResponse.model_validate(created_review)

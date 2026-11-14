@@ -33,3 +33,12 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise unauthorized
     return user
+
+
+async def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> User | None:
+    if credentials is None:
+        return None
+    return await get_current_user(credentials, session)

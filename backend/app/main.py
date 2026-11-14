@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
 from app.api.movies import router as movies_router
+from app.api.reviews import router as reviews_router
 from app.core.config import settings
 from app.db.database import engine
 
@@ -24,6 +25,7 @@ app = FastAPI(
 
 app.include_router(auth_router)
 app.include_router(movies_router)
+app.include_router(reviews_router)
 
 
 @app.get("/")

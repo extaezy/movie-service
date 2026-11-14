@@ -7,6 +7,7 @@ from app.api.movies import router as movies_router
 from app.api.reviews import router as reviews_router
 from app.core.config import settings
 from app.db.database import engine
+from app.api.lists import router as lists_router
 
 
 @asynccontextmanager
@@ -28,6 +29,7 @@ app.include_router(movies_router)
 app.include_router(reviews_router)
 
 
+app.include_router(lists_router)
 @app.get("/")
 def root():
     return {"message": settings.app_name, "version": settings.app_version}

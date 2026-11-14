@@ -24,6 +24,22 @@
 .\.venv\Scripts\python.exe -m ruff check app tests
 ```
 
+Тесты API фильмов и адаптера TMDB запускаются без PostgreSQL, Docker и внешнего токена:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_tmdb.py tests/test_movies_api.py -q -rx
+```
+
+Ответы внешнего API подставляются через HTTPX MockTransport, операции репозитория в API-тестах подменены. Реальное сохранение фильмов в БД этим блоком не проверяется. Сценарии, результаты и известный дефект поиска описаны в [чек-листе фильмов](docs/testing/checklists/movies.md).
+
+Проверки входа и текущего пользователя с подменённым репозиторием также доступны без PostgreSQL:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_auth_api.py -q
+```
+
+Их область и ограничения описаны в [отчёте auth API](docs/testing/checklists/auth-api.md). Новые темы для самостоятельных тестов разобраны в [практике JWT](docs/testing/exercises/jwt.md).
+
 Проверка авторизации на базе из текущих настроек запускается явно:
 
 ```powershell

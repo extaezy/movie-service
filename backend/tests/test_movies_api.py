@@ -10,6 +10,8 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from pydantic import SecretStr
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.tmdb import open_tmdb_client
@@ -103,6 +105,32 @@ async def movies_client(movie_api):
         transport=httpx.ASGITransport(app=movie_api.app), base_url="http://test"
     ) as client:
         yield client
+
+
+@pytest.fixture
+def movie_database_api(movie_api, monkeypatch):
+    from app.api import movies
+    from app.db import database
+
+    del movie_api.app.dependency_overrides[movies.get_db]
+    movie_api.session.__aenter__.return_value = movie_api.session
+    movie_api.session.__aexit__.return_value = False
+    session_factory = MagicMock(return_value=movie_api.session)
+    monkeypatch.setattr(database, "async_session", session_factory)
+    movie_api.session_factory = session_factory
+    return movie_api
+
+
+@pytest.fixture(params=["driver", "pool-timeout", "connection-refused", "timeout"])
+def database_read_error(request):
+    message = "Simulated database failure with fake-password-marker"
+    if request.param == "driver":
+        return OperationalError("SELECT movie", {}, OSError(message))
+    if request.param == "pool-timeout":
+        return SQLAlchemyTimeoutError(message)
+    if request.param == "connection-refused":
+        return ConnectionRefusedError(message)
+    return TimeoutError(message)
 
 
 async def test_search_is_public_and_uses_external_ids_without_database(
@@ -389,3 +417,92 @@ async def test_tmdb_error_does_not_expose_token(
         and record.levelno == logging.WARNING
         for record in caplog.records
     )
+
+
+@pytest.mark.parametrize("lookup", ["local-id", "tmdb-id"])
+async def test_database_read_errors_return_safe_503(
+    movies_client, movie_database_api, database_read_error, lookup
+):
+    if lookup == "local-id":
+        endpoint = f"/movies/{movie_database_api.movie.id}"
+        read_movie = movie_database_api.get_by_id
+        movie_id = movie_database_api.movie.id
+    else:
+        endpoint = f"/movies/tmdb/{movie_database_api.movie.tmdb_id}"
+        read_movie = movie_database_api.get_by_tmdb_id
+        movie_id = movie_database_api.movie.tmdb_id
+    read_movie.side_effect = database_read_error
+
+    response = await movies_client.get(endpoint)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "База данных временно недоступна"}
+    assert "fake-password-marker" not in response.text
+    read_movie.assert_awaited_once_with(movie_database_api.session, movie_id)
+    movie_database_api.session.rollback.assert_awaited_once()
+    movie_database_api.session.__aexit__.assert_awaited_once()
+    movie_database_api.session_factory.assert_called_once_with()
+    movie_database_api.save.assert_not_awaited()
+    assert movie_database_api.upstream_requests == []
+
+
+async def test_database_read_failure_keeps_movie_search_available(
+    movies_client, movie_database_api, tmdb_search_payload
+):
+    movie_database_api.get_by_id.side_effect = SQLAlchemyTimeoutError(
+        "Simulated database pool timeout"
+    )
+    movie_database_api.use_upstream(
+        lambda request: httpx.Response(200, json=tmdb_search_payload)
+    )
+
+    failed_response = await movies_client.get(f"/movies/{movie_database_api.movie.id}")
+    assert failed_response.status_code == 503
+
+    search_response = await movies_client.get(
+        "/movies/search", params={"q": "Матрица", "page": 2}
+    )
+
+    assert search_response.status_code == 200
+    assert search_response.json()["results"][0]["tmdb_id"] == 603
+    assert len(movie_database_api.upstream_requests) == 1
+    movie_database_api.session_factory.assert_called_once_with()
+    movie_database_api.session.rollback.assert_awaited_once()
+    movie_database_api.get_by_id.assert_awaited_once_with(
+        movie_database_api.session, movie_database_api.movie.id
+    )
+    movie_database_api.save.assert_not_awaited()
+
+
+async def test_local_movie_read_recovers_after_database_error(
+    movies_client, movie_database_api
+):
+    endpoint = f"/movies/{movie_database_api.movie.id}"
+    read_movie = movie_database_api.get_by_id
+
+    temporary_error = SQLAlchemyTimeoutError("Simulated temporary database failure")
+
+    expected_error_status = 503
+    expected_success_status = 200
+    expected_error_json = {"detail": "База данных временно недоступна"}
+    expected_movie_json = movie_database_api.movie.model_dump(mode="json")
+    expected_read_count = 2
+
+    read_movie.side_effect = [temporary_error, movie_database_api.movie]
+
+    first_response = await movies_client.get(endpoint)
+    assert first_response.status_code == expected_error_status
+    assert first_response.json() == expected_error_json
+    movie_database_api.session.rollback.assert_awaited_once()
+
+    second_response = await movies_client.get(endpoint)
+    assert second_response.status_code == expected_success_status
+    assert second_response.json() == expected_movie_json
+    assert read_movie.await_count == expected_read_count
+    movie_database_api.session.rollback.assert_awaited_once()
+    assert movie_database_api.session_factory.call_count == expected_read_count
+    assert movie_database_api.session.__aenter__.await_count == expected_read_count
+    assert movie_database_api.session.__aexit__.await_count == expected_read_count
+    movie_database_api.get_by_tmdb_id.assert_not_awaited()
+    movie_database_api.save.assert_not_awaited()
+    assert movie_database_api.upstream_requests == []

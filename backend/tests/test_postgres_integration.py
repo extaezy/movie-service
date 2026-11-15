@@ -1,15 +1,19 @@
 import asyncio
 import os
+from datetime import date
+from functools import partial
 from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
+from pydantic import SecretStr
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models import (
     Base,
@@ -17,13 +21,16 @@ from app.db.models import (
     CriticReview,
     CriticSource,
     Friendship,
+    Genre,
     Movie,
+    MovieGenre,
     Profile,
     Rating,
     User,
     UserMovieEntry,
     UserReview,
 )
+from app.integrations.tmdb import open_tmdb_client
 
 TEST_DATABASE_URL = os.getenv("MOVIE_SERVICE_TEST_DATABASE_URL")
 pytestmark = [
@@ -73,6 +80,87 @@ async def client(database):
         transport=httpx.ASGITransport(app=database.app), base_url="http://test"
     ) as value:
         yield value
+
+
+@pytest.fixture
+def catalog_tmdb(monkeypatch, tmdb_settings):
+    from app.api import movies
+
+    upstream_requests = []
+
+    def use_upstream(handler):
+        def record_request(request):
+            upstream_requests.append(request)
+            return handler(request)
+
+        monkeypatch.setattr(
+            movies,
+            "open_tmdb_client",
+            partial(
+                open_tmdb_client,
+                config=tmdb_settings,
+                transport=httpx.MockTransport(record_request),
+            ),
+        )
+
+    def unexpected_request(request):
+        pytest.fail("This request must read the local catalog without calling TMDB")
+
+    use_upstream(unexpected_request)
+    return SimpleNamespace(
+        use_upstream=use_upstream,
+        upstream_requests=upstream_requests,
+        settings=tmdb_settings,
+    )
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def isolated_movie_database(database, records, monkeypatch):
+    from app.db import database as database_module
+
+    application_name = f"movie-service-recovery-{uuid4().hex}"
+    recovery_engine = create_async_engine(
+        database.engine.url,
+        connect_args={
+            **database_module.connect_args,
+            "server_settings": {"application_name": application_name},
+        },
+        pool_pre_ping=True,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=2,
+        hide_parameters=True,
+    )
+    sessions = async_sessionmaker(recovery_engine, expire_on_commit=False)
+    terminated_pids = []
+
+    async def terminate_connection(pid):
+        async with database.engine.begin() as connection:
+            terminated = await connection.scalar(
+                text(
+                    "SELECT pg_terminate_backend(pid, 5000) "
+                    "FROM pg_stat_activity "
+                    "WHERE pid = :pid AND application_name = :application_name "
+                    "AND datname = current_database() AND pid <> pg_backend_pid()"
+                ),
+                {"pid": pid, "application_name": application_name},
+            )
+        assert terminated is True
+        terminated_pids.append(pid)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(database_module, "async_session", sessions)
+            yield SimpleNamespace(
+                engine=recovery_engine,
+                sessions=sessions,
+                endpoint=f"/movies/{records[1]}",
+                movie_id=records[1],
+                terminate_connection=terminate_connection,
+                terminated_pids=terminated_pids,
+            )
+    finally:
+        await recovery_engine.dispose()
 
 
 def registration():
@@ -545,6 +633,256 @@ async def test_inactive_user_and_wrong_credentials_are_rejected(client, database
     ).status_code == 401
 
 
+async def test_movie_import_commits_movie_genres_and_links(
+    client, database, catalog_tmdb, tmdb_details_payload
+):
+    payload = tmdb_details_payload
+    payload["genres"] = [
+        {"id": 878, "name": "Фантастика"},
+        {"id": 28, "name": "Боевик"},
+    ]
+    catalog_tmdb.use_upstream(lambda request: httpx.Response(200, json=payload))
+
+    response = await client.get(f"/movies/tmdb/{payload['id']}")
+
+    assert response.status_code == 200
+    async with database.sessions() as session:
+        movies = (await session.scalars(select(Movie))).all()
+        genres = (await session.scalars(select(Genre))).all()
+        links = (await session.scalars(select(MovieGenre))).all()
+        assert len(movies) == 1
+        assert len(genres) == 2
+        assert len(links) == 2
+        movie = movies[0]
+        assert movie.tmdb_id == payload["id"]
+        assert movie.release_date == date(1999, 3, 31)
+        assert movie.runtime == payload["runtime"]
+        assert {(link.movie_id, link.genre_id) for link in links} == {
+            (movie.id, genre.id) for genre in genres
+        }
+        expected_response = {
+            "id": movie.id,
+            "tmdb_id": payload["id"],
+            "title": payload["title"],
+            "original_title": payload["original_title"],
+            "overview": payload["overview"],
+            "release_date": payload["release_date"],
+            "poster_path": payload["poster_path"],
+            "runtime": payload["runtime"],
+            "original_language": payload["original_language"],
+            "genres": [
+                {"id": genre.id, "tmdb_id": genre.tmdb_id, "name": genre.name}
+                for genre in sorted(genres, key=lambda genre: genre.tmdb_id)
+            ],
+        }
+        assert {(genre.tmdb_id, genre.name) for genre in genres} == {
+            (28, "Боевик"), (878, "Фантастика")
+        }
+    assert response.json() == expected_response
+    local_response = await client.get(f"/movies/{movie.id}")
+    assert local_response.status_code == 200
+    assert local_response.json() == expected_response
+    assert len(catalog_tmdb.upstream_requests) == 1
+
+
+async def test_movie_import_persists_unknown_date_and_runtime(
+    client, database, catalog_tmdb, tmdb_details_payload
+):
+    payload = tmdb_details_payload
+    payload.update(release_date="", runtime=0, genres=[])
+    catalog_tmdb.use_upstream(lambda request: httpx.Response(200, json=payload))
+
+    response = await client.get(f"/movies/tmdb/{payload['id']}")
+
+    assert response.status_code == 200
+    assert response.json()["release_date"] is None
+    assert response.json()["runtime"] is None
+    assert response.json()["genres"] == []
+    async with database.sessions() as session:
+        movies = (await session.scalars(select(Movie))).all()
+        assert len(movies) == 1
+        assert movies[0].id == response.json()["id"]
+        assert movies[0].tmdb_id == payload["id"]
+        assert movies[0].release_date is None
+        assert movies[0].runtime is None
+        assert (await session.scalars(select(Genre))).all() == []
+        assert (await session.scalars(select(MovieGenre))).all() == []
+
+
+async def test_movie_import_reuses_existing_genres_and_deduplicates_links(
+    client, database, catalog_tmdb, tmdb_details_payload
+):
+    async with database.sessions() as session, session.begin():
+        existing_genre = Genre(tmdb_id=28, name="Сохранённый боевик")
+        session.add(existing_genre)
+    first_payload = {
+        **tmdb_details_payload,
+        "genres": [
+            {"id": 28, "name": "Новое название"},
+            {"id": 878, "name": "Фантастика"},
+        ],
+    }
+    second_payload = {
+        **tmdb_details_payload,
+        "id": 604,
+        "title": "Второй фильм",
+        "genres": [
+            {"id": 28, "name": "Новое название"},
+            {"id": 18, "name": "Драма"},
+            {"id": 18, "name": "Драма"},
+        ],
+    }
+    payloads = {603: first_payload, 604: second_payload}
+    catalog_tmdb.use_upstream(
+        lambda request: httpx.Response(
+            200, json=payloads[int(request.url.path.rsplit("/", 1)[-1])]
+        )
+    )
+
+    first_response = await client.get("/movies/tmdb/603")
+    second_response = await client.get("/movies/tmdb/604")
+
+    assert first_response.status_code == second_response.status_code == 200
+    assert first_response.json()["id"] != second_response.json()["id"]
+    async with database.sessions() as session:
+        movies = (await session.scalars(select(Movie))).all()
+        genres = (await session.scalars(select(Genre))).all()
+        links = (await session.scalars(select(MovieGenre))).all()
+        assert len(movies) == 2
+        assert len(genres) == 3
+        assert len(links) == 4
+        genres_by_tmdb_id = {genre.tmdb_id: genre for genre in genres}
+        assert genres_by_tmdb_id[28].id == existing_genre.id
+        assert genres_by_tmdb_id[28].name == "Сохранённый боевик"
+        assert {(link.movie_id, link.genre_id) for link in links} == {
+            (first_response.json()["id"], genres_by_tmdb_id[28].id),
+            (first_response.json()["id"], genres_by_tmdb_id[878].id),
+            (second_response.json()["id"], genres_by_tmdb_id[28].id),
+            (second_response.json()["id"], genres_by_tmdb_id[18].id),
+        }
+        for response, genre_ids in [
+            (first_response, [28, 878]),
+            (second_response, [18, 28]),
+        ]:
+            assert response.json()["genres"] == [
+                {
+                    "id": genres_by_tmdb_id[tmdb_id].id,
+                    "tmdb_id": tmdb_id,
+                    "name": genres_by_tmdb_id[tmdb_id].name,
+                }
+                for tmdb_id in genre_ids
+            ]
+    assert len(catalog_tmdb.upstream_requests) == 2
+
+
+@pytest.mark.parametrize("token", ["", "local-tmdb-test-token"], ids=["no-token", "configured"])
+async def test_cached_movie_is_read_from_database_without_tmdb(
+    client, database, catalog_tmdb, tmdb_details_payload, token
+):
+    payload = tmdb_details_payload
+    catalog_tmdb.use_upstream(lambda request: httpx.Response(200, json=payload))
+    imported_response = await client.get(f"/movies/tmdb/{payload['id']}")
+    assert imported_response.status_code == 200
+    original_card = imported_response.json()
+    payload["title"] = "Изменённое название TMDB"
+    payload["genres"] = [{"id": 18, "name": "Драма"}]
+    catalog_tmdb.settings.tmdb_access_token = SecretStr(token)
+
+    def unavailable_upstream(request):
+        pytest.fail("Cached cards must not call the unavailable external service")
+
+    catalog_tmdb.use_upstream(unavailable_upstream)
+
+    repeated_response = await client.get(f"/movies/tmdb/{payload['id']}")
+    local_response = await client.get(f"/movies/{original_card['id']}")
+
+    assert repeated_response.status_code == local_response.status_code == 200
+    assert repeated_response.json() == local_response.json() == original_card
+    assert len(catalog_tmdb.upstream_requests) == 1
+    async with database.sessions() as session:
+        movies = (await session.scalars(select(Movie))).all()
+        genres = (await session.scalars(select(Genre))).all()
+        links = (await session.scalars(select(MovieGenre))).all()
+        assert len(movies) == len(genres) == len(links) == 1
+        assert movies[0].id == original_card["id"]
+        assert movies[0].title == original_card["title"]
+        assert genres[0].tmdb_id == 28
+        assert (links[0].movie_id, links[0].genre_id) == (movies[0].id, genres[0].id)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [("not-found", 404), ("adult", 404), ("wrong-id", 502), ("timeout", 502)],
+)
+async def test_failed_movie_import_leaves_catalog_empty(
+    client, database, catalog_tmdb, tmdb_details_payload, failure, expected_status
+):
+    payload = tmdb_details_payload
+    if failure == "adult":
+        payload["adult"] = True
+    elif failure == "wrong-id":
+        payload["id"] += 1
+
+    def upstream(request):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("Simulated TMDB timeout", request=request)
+        return httpx.Response(404 if failure == "not-found" else 200, json=payload)
+
+    catalog_tmdb.use_upstream(upstream)
+
+    response = await client.get("/movies/tmdb/603")
+
+    assert response.status_code == expected_status
+    assert set(response.json()) == {"detail"}
+    assert len(catalog_tmdb.upstream_requests) == 1
+    async with database.sessions() as session:
+        assert (await session.scalars(select(Movie))).all() == []
+        assert (await session.scalars(select(Genre))).all() == []
+        assert (await session.scalars(select(MovieGenre))).all() == []
+
+
+async def test_movie_import_rolls_back_all_catalog_rows_after_database_failure(
+    client, database, catalog_tmdb, tmdb_details_payload, monkeypatch
+):
+    from app.repositories import movie_repository
+
+    payload = tmdb_details_payload
+    catalog_tmdb.use_upstream(lambda request: httpx.Response(200, json=payload))
+    pending_rows = []
+
+    async def fail_after_inserts(session, movie):
+        movies = (await session.scalars(select(Movie))).all()
+        genres = (await session.scalars(select(Genre))).all()
+        links = (await session.scalars(select(MovieGenre))).all()
+        pending_rows.append((len(movies), len(genres), len(links)))
+        raise SQLAlchemyTimeoutError("Simulated database failure after catalog inserts")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(movie_repository, "movie_response", fail_after_inserts)
+        failed_response = await client.get(f"/movies/tmdb/{payload['id']}")
+
+    assert failed_response.status_code == 503
+    assert failed_response.json() == {"detail": "База данных временно недоступна"}
+    assert pending_rows == [(1, 1, 1)]
+    async with database.sessions() as session:
+        assert (await session.scalars(select(Movie))).all() == []
+        assert (await session.scalars(select(Genre))).all() == []
+        assert (await session.scalars(select(MovieGenre))).all() == []
+
+    recovered_response = await client.get(f"/movies/tmdb/{payload['id']}")
+
+    assert recovered_response.status_code == 200
+    assert recovered_response.json()["tmdb_id"] == payload["id"]
+    async with database.sessions() as session:
+        movies = (await session.scalars(select(Movie))).all()
+        genres = (await session.scalars(select(Genre))).all()
+        links = (await session.scalars(select(MovieGenre))).all()
+        assert len(movies) == len(genres) == len(links) == 1
+        assert movies[0].id == recovered_response.json()["id"]
+        assert (links[0].movie_id, links[0].genre_id) == (movies[0].id, genres[0].id)
+    assert len(catalog_tmdb.upstream_requests) == 2
+
+
 @pytest_asyncio.fixture(loop_scope="module")
 async def records(database):
     async with database.sessions() as session:
@@ -679,3 +1017,255 @@ async def test_tables_have_rls_and_root_is_available(client, database):
         )
         assert count == 12
     assert (await client.get("/")).status_code == 200
+
+
+async def test_concurrent_movie_imports_keep_one_card(
+    client, database, catalog_tmdb, tmdb_details_payload
+):
+    endpoint = "/movies/tmdb/603"
+    request_count = 2
+    barrier = asyncio.Barrier(request_count)
+    timeout_seconds = 5
+
+    payloads = [
+        {
+            **tmdb_details_payload,
+            "title": "Первая версия",
+            "genres": [{"id": 28, "name": "Боевик"}],
+        },
+        {
+            **tmdb_details_payload,
+            "title": "Вторая версия",
+            "genres": [{"id": 18, "name": "Драма"}],
+        },
+    ]
+
+    expected_status = 200
+    expected_movie_count = 1
+    expected_genre_count = 1
+    expected_link_count = 1
+    expected_upstream_request_count = 2
+
+    async def upstream(request):
+        payload = payloads[len(catalog_tmdb.upstream_requests) - 1]
+        await barrier.wait()
+        return httpx.Response(status_code=200, json=payload)
+
+    catalog_tmdb.use_upstream(upstream)
+    responses = await asyncio.wait_for(
+        asyncio.gather(
+            client.get(endpoint),
+            client.get(endpoint),
+        ),
+        timeout=timeout_seconds,
+    )
+    assert responses[0].status_code == expected_status
+    assert responses[1].status_code == expected_status
+
+    first_card = responses[0].json()
+    second_card = responses[1].json()
+    allowed_versions = []
+    for payload in payloads:
+        allowed_versions.append(
+            (payload["title"], payload["genres"][0]["id"], payload["genres"][0]["name"])
+        )
+    actual_version = (
+        first_card["title"],
+        first_card["genres"][0]["tmdb_id"],
+        first_card["genres"][0]["name"],
+    )
+    assert actual_version in allowed_versions
+    assert first_card == second_card
+    assert first_card["tmdb_id"] == tmdb_details_payload["id"]
+    assert len(catalog_tmdb.upstream_requests) == expected_upstream_request_count
+    async with database.sessions() as session:
+        movies = (await session.scalars(select(Movie))).all()
+        genres = (await session.scalars(select(Genre))).all()
+        links = (await session.scalars(select(MovieGenre))).all()
+        assert len(movies) == expected_movie_count
+        assert len(genres) == expected_genre_count
+        assert len(links) == expected_link_count
+        movie = movies[0]
+        genre = genres[0]
+        link = links[0]
+        assert movie.id == first_card["id"]
+        assert movie.tmdb_id == first_card["tmdb_id"]
+        assert movie.title == first_card["title"]
+        assert first_card["genres"] == [
+            {"id": genre.id, "tmdb_id": genre.tmdb_id, "name": genre.name}
+        ]
+        assert (link.movie_id, link.genre_id) == (movie.id, genre.id)
+
+    def unexpected_request(request):
+        pytest.fail("Repeated opening must use the saved card without calling TMDB")
+
+    catalog_tmdb.use_upstream(unexpected_request)
+    repeated_response = await client.get(endpoint)
+    assert repeated_response.status_code == expected_status
+    assert repeated_response.json() == first_card
+    assert len(catalog_tmdb.upstream_requests) == expected_upstream_request_count
+
+
+async def test_concurrent_movie_imports_share_one_genre(
+    client, database, catalog_tmdb, tmdb_details_payload
+):
+    tmdb_ids = (603, 604)
+    endpoints = (
+        "/movies/tmdb/603",
+        "/movies/tmdb/604",
+    )
+
+    request_count = 2
+    barrier = asyncio.Barrier(request_count)
+    timeout_seconds = 5
+
+    shared_genre = {"id": 28, "name": "Боевик"}
+
+    payloads = {
+        603: {
+            **tmdb_details_payload,
+            "id": 603,
+            "title": "Первый фильм",
+            "genres": [shared_genre.copy()],
+        },
+        604: {
+            **tmdb_details_payload,
+            "id": 604,
+            "title": "Второй фильм",
+            "genres": [shared_genre.copy()],
+        },
+    }
+
+    expected_status = 200
+    expected_movie_count = 2
+    expected_genre_count = 1
+    expected_link_count = 2
+    expected_upstream_request_count = 2
+
+    async def upstream(request):
+        payload_id = int(request.url.path.split("/")[-1])
+        payload = payloads[payload_id]
+        await barrier.wait()
+        return httpx.Response(status_code=200, json=payload)
+
+    catalog_tmdb.use_upstream(upstream)
+    responses = await asyncio.wait_for(
+        asyncio.gather(
+            client.get(endpoints[0]),
+            client.get(endpoints[1]),
+        ),
+        timeout=timeout_seconds,
+    )
+    assert responses[0].status_code == expected_status
+    assert responses[1].status_code == expected_status
+    first_card = responses[0].json()
+    second_card = responses[1].json()
+    assert first_card["tmdb_id"] == tmdb_ids[0]
+    assert second_card["tmdb_id"] == tmdb_ids[1]
+    assert first_card["title"] == payloads[603]["title"]
+    assert second_card["title"] == payloads[604]["title"]
+    assert first_card["id"] != second_card["id"]
+    assert len(first_card["genres"]) == expected_genre_count
+    assert len(second_card["genres"]) == expected_genre_count
+    assert first_card["genres"][0]["tmdb_id"] == shared_genre["id"]
+    assert second_card["genres"][0]["tmdb_id"] == shared_genre["id"]
+    assert first_card["genres"][0]["name"] == shared_genre["name"]
+    assert second_card["genres"][0]["name"] == shared_genre["name"]
+    assert first_card["genres"] == second_card["genres"]
+    assert len(catalog_tmdb.upstream_requests) == expected_upstream_request_count
+    async with database.sessions() as session:
+        result_movies = await session.scalars(select(Movie))
+        movies = result_movies.all()
+        assert len(movies) == expected_movie_count
+        result_genres = await session.scalars(select(Genre))
+        genres = result_genres.all()
+        assert len(genres) == expected_genre_count
+        result_links = await session.scalars(select(MovieGenre))
+        links = result_links.all()
+        assert len(links) == expected_link_count
+        movies_by_tmdb_id = {movie.tmdb_id: movie for movie in movies}
+        assert set(movies_by_tmdb_id) == set(tmdb_ids)
+        genre = genres[0]
+        assert genre.tmdb_id == shared_genre["id"]
+        assert genre.name == shared_genre["name"]
+        for card in [first_card, second_card]:
+            movie = movies_by_tmdb_id[card["tmdb_id"]]
+            assert movie.id == card["id"]
+            assert movie.title == card["title"]
+            assert card["genres"] == [
+                {"id": genre.id, "tmdb_id": genre.tmdb_id, "name": genre.name}
+            ]
+        assert {(link.movie_id, link.genre_id) for link in links} == {
+            (movies_by_tmdb_id[tmdb_id].id, genre.id) for tmdb_id in tmdb_ids
+        }
+
+
+async def test_local_movie_read_recovers_after_connection_termination(
+    client, database, isolated_movie_database, catalog_tmdb, monkeypatch
+):
+    from app.api import movies
+
+    endpoint = isolated_movie_database.endpoint
+    initial_response = await client.get(endpoint)
+    assert initial_response.status_code == 200
+    expected_card = initial_response.json()
+    original_read = movies.get_movie_by_id
+    interrupted_pids = []
+
+    async def terminate_before_read(session, movie_id):
+        pid = await session.scalar(text("SELECT pg_backend_pid()"))
+        interrupted_pids.append(pid)
+        await isolated_movie_database.terminate_connection(pid)
+        return await original_read(session, movie_id)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(movies, "get_movie_by_id", terminate_before_read)
+        failed_response = await asyncio.wait_for(client.get(endpoint), timeout=10)
+
+    assert failed_response.status_code == 503
+    assert failed_response.json() == {"detail": "База данных временно недоступна"}
+    assert len(interrupted_pids) == 1
+    assert isolated_movie_database.terminated_pids == interrupted_pids
+
+    recovered_response = await client.get(endpoint)
+
+    assert recovered_response.status_code == 200
+    assert recovered_response.json() == expected_card
+    async with isolated_movie_database.sessions() as session:
+        recovered_pid = await session.scalar(text("SELECT pg_backend_pid()"))
+    assert recovered_pid not in interrupted_pids
+    async with database.sessions() as session:
+        movie = await session.get(Movie, isolated_movie_database.movie_id)
+        assert movie is not None
+        assert movie.title == expected_card["title"]
+    assert catalog_tmdb.upstream_requests == []
+
+
+async def test_local_movie_read_replaces_dead_idle_connection(
+    client, isolated_movie_database, catalog_tmdb
+):
+    endpoint = isolated_movie_database.endpoint
+    pid_query = text("SELECT pg_backend_pid()")
+
+    expected_status = 200
+    expected_terminated_count = 1
+
+    initial_response = await client.get(endpoint)
+    assert initial_response.status_code == expected_status
+    expected_card = initial_response.json()
+
+    async with isolated_movie_database.sessions() as session:
+        before_pid = await session.scalar(pid_query)
+
+    await isolated_movie_database.terminate_connection(before_pid)
+    response = await client.get(endpoint)
+    assert response.status_code == expected_status
+    assert response.json() == expected_card
+
+    async with isolated_movie_database.sessions() as session:
+        after_pid = await session.scalar(pid_query)
+
+    assert after_pid != before_pid
+    assert len(isolated_movie_database.terminated_pids) == expected_terminated_count
+    assert isolated_movie_database.terminated_pids == [before_pid]
+    assert catalog_tmdb.upstream_requests == []

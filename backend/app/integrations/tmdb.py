@@ -2,6 +2,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date
+from decimal import Decimal
+from typing import Literal
 
 import httpx
 from fastapi import HTTPException
@@ -18,6 +20,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.db.settings import BASE_DIR
 
 logger = logging.getLogger(__name__)
+
+TMDBDiscoverSort = Literal["popularity_desc", "release_date_asc", "release_date_desc"]
+TMDB_MAX_PAGE = 500
 
 
 class TMDBSettings(BaseSettings):
@@ -88,6 +93,8 @@ class TMDBMovieDetails(TMDBMovie):
     runtime: int | None = Field(default=None, gt=0, le=2147483647)
     genres: list[TMDBGenre]
     adult: bool
+    vote_average: Decimal | None = Field(default=None, ge=0, le=10)
+    vote_count: int | None = Field(default=None, ge=0, le=2147483647)
 
     @field_validator("runtime", mode="before")
     @classmethod
@@ -135,13 +142,41 @@ class TMDBClient:
         query = query.strip()
         if not query or len(query) > 200:
             raise ValueError("Search query must contain between 1 and 200 characters")
-        if not 1 <= page <= 500:
+        if not 1 <= page <= TMDB_MAX_PAGE:
             raise ValueError("Search page must be between 1 and 500")
+        return await self._get_movie_page("search/movie", page, {"query": query})
+
+    async def discover_movies(
+        self,
+        *,
+        page: int,
+        tmdb_genre_id: int | None,
+        year: int | None,
+        sort: TMDBDiscoverSort,
+    ) -> TMDBSearchResult:
+        sort_by = {
+            "popularity_desc": "popularity.desc",
+            "release_date_asc": "primary_release_date.asc",
+            "release_date_desc": "primary_release_date.desc",
+        }
+        filters: dict[str, str | int] = {"sort_by": sort_by[sort]}
+        if tmdb_genre_id is not None:
+            filters["with_genres"] = tmdb_genre_id
+        if year is not None:
+            filters["primary_release_year"] = year
+
+        result = await self._get_movie_page("discover/movie", page, filters)
+        result.total_pages = min(result.total_pages, TMDB_MAX_PAGE)
+        return result
+
+    async def _get_movie_page(
+        self, endpoint: str, page: int, filters: dict[str, str | int]
+    ) -> TMDBSearchResult:
         try:
             response = await self.client.get(
-                "search/movie",
+                endpoint,
                 params={
-                    "query": query,
+                    **filters,
                     "page": page,
                     "language": self.language,
                     "include_adult": "false",
@@ -150,13 +185,15 @@ class TMDBClient:
             response.raise_for_status()
             return TMDBSearchResult.model_validate(response.json())
         except httpx.HTTPStatusError as exc:
-            logger.warning("TMDB search failed with HTTP %s", exc.response.status_code)
+            logger.warning(
+                "TMDB %s failed with HTTP %s", endpoint, exc.response.status_code
+            )
             raise HTTPException(502, "TMDB временно недоступен") from None
         except httpx.RequestError:
-            logger.warning("TMDB search connection failed")
+            logger.warning("TMDB %s connection failed", endpoint)
             raise HTTPException(502, "Не удалось подключиться к TMDB") from None
         except (ValidationError, ValueError):
-            logger.warning("TMDB search returned invalid data")
+            logger.warning("TMDB %s returned invalid data", endpoint)
             raise HTTPException(502, "TMDB вернул некорректные данные") from None
 
 

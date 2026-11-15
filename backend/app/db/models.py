@@ -130,6 +130,10 @@ class Movie(Base):
         CheckConstraint("tmdb_id > 0", name="positive_tmdb_id"),
         CheckConstraint("char_length(btrim(title)) > 0", name="nonempty_title"),
         CheckConstraint("runtime IS NULL OR runtime > 0", name="positive_runtime"),
+        CheckConstraint(
+            "tmdb_vote_average BETWEEN 0 AND 10", name="tmdb_vote_average_range"
+        ),
+        CheckConstraint("tmdb_vote_count >= 0", name="tmdb_vote_count_nonnegative"),
         Index("ix_movies_release_date", "release_date"),
     )
 
@@ -142,6 +146,11 @@ class Movie(Base):
     poster_path: Mapped[str | None] = mapped_column(Text)
     runtime: Mapped[int | None] = mapped_column(Integer)
     original_language: Mapped[str | None] = mapped_column(String(10))
+    tmdb_vote_average: Mapped[Decimal | None] = mapped_column(Numeric(5, 3))
+    tmdb_vote_count: Mapped[int | None] = mapped_column(Integer)
+    tmdb_rating_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -1,0 +1,10 @@
+.empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 48px 24px;
+  color: #9ca3af;
+  font-size: 16px;
+  text-align: center;
+  width: 100%;
+}

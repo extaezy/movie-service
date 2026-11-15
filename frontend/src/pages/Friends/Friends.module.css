@@ -1,0 +1,121 @@
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.tabsBar {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.tabBtn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 0;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+}
+.tabBtn:hover,
+.tabBtn.activeTab {
+  color: #ffffff;
+}
+.tabBtn.activeTab::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #7c3aed;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.userCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background-color: #1a1a24;
+  padding: 16px 20px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.2s;
+}
+.userCard:hover {
+  transform: translateX(4px);
+}
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: #272733;
+}
+.userInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.displayName {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffffff;
+}
+.username {
+  font-size: 13px;
+  color: #9ca3af;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+}
+.primaryBtn {
+  background-color: #7c3aed;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.primaryBtn:hover {
+  background-color: #8b5cf6;
+}
+.outlineBtn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #9ca3af;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.outlineBtn:hover {
+  color: #ffffff;
+  border-color: #ffffff;
+}
+@media (max-width: 600px) {
+  .userCard {
+    flex-wrap: wrap;
+  }
+  .actions,
+  .outlineBtn {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

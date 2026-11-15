@@ -42,6 +42,27 @@ def tmdb_search_payload():
 
 
 @pytest.fixture
+def tmdb_search_expected_json():
+    return {
+        "page": 2,
+        "total_pages": 3,
+        "total_results": 41,
+        "results": [
+            {
+                "tmdb_id": 603,
+                "title": "Матрица",
+                "original_title": "The Matrix",
+                "overview": "Описание фильма",
+                "release_date": "1999-03-31",
+                "poster_path": "/matrix.jpg",
+                "original_language": "en",
+                "genre_ids": [28, 878],
+            }
+        ],
+    }
+
+
+@pytest.fixture
 def tmdb_details_payload():
     return {
         "id": 603,

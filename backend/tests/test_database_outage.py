@@ -185,7 +185,7 @@ async def outage_service(
 
     def upstream(request):
         upstream_requests.append(request)
-        assert request.url.path == "/3/search/movie"
+        assert request.url.path in {"/3/search/movie", "/3/discover/movie"}
         return httpx.Response(200, json=tmdb_search_payload)
 
     try:
@@ -335,3 +335,32 @@ async def test_movie_reads_recover_after_database_outage(outage_service):
     assert local_response.json() == card
     assert tmdb_response.json() == card
     assert len(outage_service.upstream_requests) == expected_upstream_requests
+
+
+async def test_discover_stays_available_during_database_outage(
+    outage_service, tmdb_search_expected_json
+):
+    client = outage_service.client
+    endpoint = "/movies/discover"
+    parameters = {"page": 2}
+
+    before = await client.get(endpoint, params=parameters)
+    assert before.status_code == 200
+    assert before.json() == tmdb_search_expected_json
+
+    async with outage_service.unavailable():
+        local_response = await client.get(outage_service.movie_endpoint)
+        assert local_response.status_code == 503
+        assert local_response.json() == {"detail": "База данных временно недоступна"}
+        during = await client.get(endpoint, params=parameters)
+        assert during.status_code == 200
+        assert during.json() == tmdb_search_expected_json
+
+    after = await client.get(endpoint, params=parameters)
+    assert after.status_code == 200
+    assert after.json() == tmdb_search_expected_json
+    assert len(outage_service.upstream_requests) == 3
+    assert all(
+        request.url.path == "/3/discover/movie"
+        for request in outage_service.upstream_requests
+    )

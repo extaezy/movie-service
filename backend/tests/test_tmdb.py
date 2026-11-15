@@ -153,7 +153,7 @@ async def test_get_movie_preserves_not_found_status(tmdb_settings):
     assert caught.value.status_code == 404
 
 
-@pytest.mark.parametrize("operation", ["search", "details"])
+@pytest.mark.parametrize("operation", ["search", "details", "discover"])
 @pytest.mark.parametrize("status_code", [302, 401, 403, 429, 500, 503])
 async def test_upstream_http_errors_are_safe_bad_gateway_responses(
     tmdb_settings, caplog, operation, status_code
@@ -176,6 +176,10 @@ async def test_upstream_http_errors_are_safe_bad_gateway_responses(
             with pytest.raises(HTTPException) as caught:
                 if operation == "search":
                     await client.search_movies("Матрица")
+                elif operation == "discover":
+                    await client.discover_movies(
+                        page=1, tmdb_genre_id=None, year=None, sort="popularity_desc"
+                    )
                 else:
                     await client.get_movie(603)
 
@@ -185,7 +189,7 @@ async def test_upstream_http_errors_are_safe_bad_gateway_responses(
     assert len(requests) == 1
 
 
-@pytest.mark.parametrize("operation", ["search", "details"])
+@pytest.mark.parametrize("operation", ["search", "details", "discover"])
 @pytest.mark.parametrize("failure", [httpx.ReadTimeout, httpx.ConnectError])
 async def test_network_failures_become_safe_bad_gateway_responses(
     tmdb_settings, caplog, operation, failure
@@ -202,6 +206,10 @@ async def test_network_failures_become_safe_bad_gateway_responses(
             with pytest.raises(HTTPException) as caught:
                 if operation == "search":
                     await client.search_movies("Матрица")
+                elif operation == "discover":
+                    await client.discover_movies(
+                        page=1, tmdb_genre_id=None, year=None, sort="popularity_desc"
+                    )
                 else:
                     await client.get_movie(603)
     assert caught.value.status_code == 502
@@ -209,7 +217,7 @@ async def test_network_failures_become_safe_bad_gateway_responses(
     assert token not in caplog.text
 
 
-@pytest.mark.parametrize("operation", ["search", "details"])
+@pytest.mark.parametrize("operation", ["search", "details", "discover"])
 async def test_invalid_json_becomes_bad_gateway(tmdb_settings, operation):
     transport = httpx.MockTransport(
         lambda request: httpx.Response(200, content=b"not-json")
@@ -218,6 +226,10 @@ async def test_invalid_json_becomes_bad_gateway(tmdb_settings, operation):
         with pytest.raises(HTTPException) as caught:
             if operation == "search":
                 await client.search_movies("Матрица")
+            elif operation == "discover":
+                await client.discover_movies(
+                    page=1, tmdb_genre_id=None, year=None, sort="popularity_desc"
+                )
             else:
                 await client.get_movie(603)
     assert caught.value.status_code == 502

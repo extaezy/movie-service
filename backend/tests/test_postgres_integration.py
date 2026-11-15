@@ -115,6 +115,93 @@ def catalog_tmdb(monkeypatch, tmdb_settings):
 
 
 @pytest_asyncio.fixture(loop_scope="module")
+async def catalog_sample(database):
+    genres = [
+        Genre(id=31, tmdb_id=28, name="Боевик"),
+        Genre(id=42, tmdb_id=18, name="Драма"),
+    ]
+    release_dates = {
+        11: date(2020, 6, 1),
+        12: date(1999, 1, 1),
+        13: date(1999, 12, 31),
+        14: date(2020, 6, 1),
+        15: None,
+        16: date(2000, 1, 1),
+        17: None,
+    }
+    genre_ids_by_movie = {
+        11: [42, 31],
+        12: [31],
+        13: [42],
+        14: [31],
+        15: [31],
+        16: [],
+        17: [42],
+    }
+    movies = [
+        Movie(
+            id=movie_id,
+            tmdb_id=1000 + movie_id,
+            title=f"Локальный фильм {movie_id}",
+            release_date=release_date,
+        )
+        for movie_id, release_date in release_dates.items()
+    ]
+    async with database.sessions() as session:
+        session.add_all(genres + movies)
+        await session.flush()
+        session.add_all(
+            MovieGenre(movie_id=movie_id, genre_id=genre_id)
+            for movie_id, genre_ids in genre_ids_by_movie.items()
+            for genre_id in genre_ids
+        )
+        await session.commit()
+    genres_by_id = {genre.id: genre for genre in genres}
+    cards = {
+        movie.id: {
+            "id": movie.id,
+            "tmdb_id": movie.tmdb_id,
+            "title": movie.title,
+            "original_title": None,
+            "overview": None,
+            "release_date": (
+                movie.release_date.isoformat() if movie.release_date else None
+            ),
+            "poster_path": None,
+            "runtime": None,
+            "original_language": None,
+            "genres": [
+                {"id": genre.id, "tmdb_id": genre.tmdb_id, "name": genre.name}
+                for genre in sorted(
+                    (genres_by_id[genre_id] for genre_id in genre_ids_by_movie[movie.id]),
+                    key=lambda genre: genre.tmdb_id,
+                )
+            ],
+        }
+        for movie in movies
+    }
+    return SimpleNamespace(cards=cards)
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def catalog_tied_pages(database):
+    dated_ids = list(range(1, 23))
+    undated_ids = [23, 24]
+    async with database.sessions() as session:
+        session.add_all(
+            Movie(
+                id=movie_id,
+                tmdb_id=2000 + movie_id,
+                title=f"Фильм на границе страниц {movie_id}",
+                release_date=date(2020, 6, 1) if movie_id in dated_ids else None,
+            )
+            for movie_id in reversed(dated_ids + undated_ids)
+        )
+        await session.commit()
+    return SimpleNamespace(expected_ids=dated_ids + undated_ids)
+
+
+@pytest_asyncio.fixture(loop_scope="module")
 async def isolated_movie_database(database, records, monkeypatch):
     from app.db import database as database_module
 
@@ -674,6 +761,11 @@ async def test_movie_import_commits_movie_genres_and_links(
                 {"id": genre.id, "tmdb_id": genre.tmdb_id, "name": genre.name}
                 for genre in sorted(genres, key=lambda genre: genre.tmdb_id)
             ],
+            "average_rating": None,
+            "ratings_count": 0,
+            "tmdb_vote_average": None,
+            "tmdb_vote_count": None,
+            "tmdb_rating_updated_at": None,
         }
         assert {(genre.tmdb_id, genre.name) for genre in genres} == {
             (28, "Боевик"), (878, "Фантастика")
@@ -1269,3 +1361,208 @@ async def test_local_movie_read_replaces_dead_idle_connection(
     assert len(isolated_movie_database.terminated_pids) == expected_terminated_count
     assert isolated_movie_database.terminated_pids == [before_pid]
     assert catalog_tmdb.upstream_requests == []
+
+
+@pytest.mark.parametrize(
+    "params, expected_ids",
+    [
+        pytest.param({}, [11, 14, 16, 13, 12, 15, 17], id="unfiltered"),
+        pytest.param({"genre_id": 31}, [11, 14, 12, 15], id="internal-genre"),
+        pytest.param({"year": 1999}, [13, 12], id="whole-year"),
+        pytest.param({"genre_id": 31, "year": 1999}, [12], id="both-filters"),
+        pytest.param({"genre_id": 999}, [], id="unknown-genre"),
+        pytest.param({"genre_id": 28}, [], id="external-id-is-not-internal"),
+        pytest.param({"year": 2010}, [], id="unknown-year"),
+        pytest.param({"genre_id": 31, "year": 2000}, [], id="filters-use-and"),
+        pytest.param({"year": 1}, [], id="first-supported-year"),
+        pytest.param({"year": 9999}, [], id="last-supported-year"),
+    ],
+)
+async def test_catalog_filters_saved_movies_without_tmdb(
+    client, catalog_sample, catalog_tmdb, params, expected_ids
+):
+    response = await client.get("/movies", params=params)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "page": 1,
+        "page_size": 20,
+        "total_results": len(expected_ids),
+        "total_pages": 1 if expected_ids else 0,
+        "results": [catalog_sample.cards[movie_id] for movie_id in expected_ids],
+    }
+    assert catalog_tmdb.upstream_requests == []
+
+
+@pytest.mark.parametrize(
+    "sort, expected_ids",
+    [
+        ("release_date_asc", [12, 13, 16, 11, 14, 15, 17]),
+        ("release_date_desc", [11, 14, 16, 13, 12, 15, 17]),
+    ],
+)
+async def test_catalog_sorts_dates_with_id_ties_and_nulls_last(
+    client, catalog_sample, catalog_tmdb, sort, expected_ids
+):
+    response = await client.get("/movies", params={"sort": sort})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "page": 1,
+        "page_size": 20,
+        "total_results": len(expected_ids),
+        "total_pages": 1,
+        "results": [catalog_sample.cards[movie_id] for movie_id in expected_ids],
+    }
+    assert catalog_tmdb.upstream_requests == []
+
+
+@pytest.mark.parametrize("page", [2, 2147483647])
+async def test_catalog_out_of_range_page_preserves_filtered_totals(
+    client, catalog_sample, catalog_tmdb, page
+):
+    response = await client.get("/movies", params={"page": page, "genre_id": 31})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "page": page,
+        "page_size": 20,
+        "total_results": 4,
+        "total_pages": 1,
+        "results": [],
+    }
+    assert catalog_tmdb.upstream_requests == []
+
+
+@pytest.mark.parametrize(
+    "movie_count, page, expected_size, expected_pages",
+    [
+        (0, 1, 0, 0),
+        (1, 1, 1, 1),
+        (19, 1, 19, 1),
+        (20, 1, 20, 1),
+        (20, 2, 0, 1),
+        (21, 2, 1, 2),
+        (40, 2, 20, 2),
+        (41, 3, 1, 3),
+    ],
+)
+async def test_catalog_pagination_counts_at_page_boundaries(
+    client, database, catalog_tmdb, movie_count, page, expected_size, expected_pages
+):
+    async with database.sessions() as session:
+        session.add_all(
+            Movie(tmdb_id=3000 + index, title=f"Фильм {index}")
+            for index in range(movie_count)
+        )
+        await session.commit()
+
+    response = await client.get("/movies", params={"page": page})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "page", "page_size", "total_results", "total_pages", "results"
+    }
+    assert body["page"] == page
+    assert body["page_size"] == 20
+    assert body["total_results"] == movie_count
+    assert body["total_pages"] == expected_pages
+    assert len(body["results"]) == expected_size
+    assert catalog_tmdb.upstream_requests == []
+
+
+@pytest.mark.parametrize(
+    "missing_field, overrides",
+    [
+        pytest.param("username", {}, id="missing-username"),
+        pytest.param("email", {}, id="missing-email"),
+        pytest.param("password", {}, id="missing-password"),
+        pytest.param("password_confirm", {}, id="missing-password-confirm"),
+        pytest.param(None, {"email": "invalid-email"}, id="invalid-email"),
+        pytest.param(None, {"password": "qa!7"}, id="short-password"),
+        pytest.param(
+            None, {"password_confirm": "different-private-marker"}, id="mismatch"
+        ),
+        pytest.param(
+            None, {"password": {"value": "nested-private-marker"}}, id="password-object"
+        ),
+    ],
+)
+async def test_registration_validation_errors_do_not_expose_input(
+    client, database, missing_field, overrides
+):
+    payload = registration()
+    payload.update(overrides)
+    if missing_field is not None:
+        del payload[missing_field]
+
+    response = await client.post("/auth/register", json=payload)
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert errors
+    assert all(set(error) == {"loc", "msg", "type"} for error in errors)
+    if missing_field is not None:
+        assert any(
+            error["loc"] == ["body", missing_field] and error["type"] == "missing"
+            for error in errors
+        )
+    for value in payload.values():
+        if isinstance(value, str):
+            assert value not in response.text
+    assert "nested-private-marker" not in response.text
+    async with database.sessions() as session:
+        assert (await session.scalars(select(User))).all() == []
+        assert (await session.scalars(select(Profile))).all() == []
+
+
+@pytest.mark.parametrize("sort", ["release_date_asc", "release_date_desc"])
+async def test_catalog_keeps_stable_order_across_page_boundary(
+    client, catalog_tied_pages, catalog_tmdb, sort
+):
+    endpoint = "/movies"
+    first_page_parameters = {"page": 1, "sort": sort}
+    second_page_parameters = {"page": 2, "sort": sort}
+
+    expected_status = 200
+    expected_page_size = 20
+    expected_total_results = 24
+    expected_total_pages = 2
+    expected_ids = catalog_tied_pages.expected_ids
+    expected_first_page_ids = expected_ids[:expected_page_size]
+    expected_second_page_ids = expected_ids[expected_page_size:]
+    expected_upstream_requests = []
+
+    first_response = await client.get(endpoint, params=first_page_parameters)
+    assert first_response.status_code == expected_status
+    first_page_data = first_response.json()
+    second_response = await client.get(endpoint, params=second_page_parameters)
+    assert second_response.status_code == expected_status
+    second_page_data = second_response.json()
+    assert first_page_data["page"] == first_page_parameters["page"]
+    assert second_page_data["page"] == second_page_parameters["page"]
+    for page_data in (first_page_data, second_page_data):
+        assert page_data["page_size"] == expected_page_size
+        assert page_data["total_results"] == expected_total_results
+        assert page_data["total_pages"] == expected_total_pages
+
+    first_page_ids = [
+        movie["id"] for movie in first_page_data["results"]
+    ]
+    second_page_ids = [
+        movie["id"] for movie in second_page_data["results"]
+    ]
+
+    combined_ids = first_page_ids + second_page_ids
+
+    assert combined_ids == expected_ids
+    assert len(set(combined_ids)) == len(combined_ids)
+    assert first_page_ids == expected_first_page_ids
+    assert second_page_ids == expected_second_page_ids
+
+    second_first_response = await client.get(endpoint, params=first_page_parameters)
+    assert second_first_response.status_code == expected_status
+    assert second_first_response.json() == first_page_data
+
+    assert expected_upstream_requests == catalog_tmdb.upstream_requests

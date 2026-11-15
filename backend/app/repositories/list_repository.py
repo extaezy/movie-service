@@ -4,7 +4,7 @@ from sqlalchemy import delete, func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Friendship, Movie, Profile, User, UserMovieEntry
+from app.db.models import Friendship, Movie, MovieGenre, Profile, User, UserMovieEntry
 from app.schemas.lists import ListedMovieResponse, ListType, MovieListPage
 
 MOVIE_LIST_PAGE_SIZE = 20
@@ -47,6 +47,8 @@ async def get_visible_movie_list(
     viewer_id: UUID | None,
     *,
     page: int,
+    q: str | None = None,
+    genre_id: int | None = None,
 ) -> MovieListPage | None:
     access = Profile.is_private.is_(False)
     if viewer_id is not None:
@@ -62,18 +64,20 @@ async def get_visible_movie_list(
         )
         access = or_(access, User.id == viewer_id, accepted_friendship)
 
-    list_filters = (
+    list_filters = [
         UserMovieEntry.user_id == User.id,
         UserMovieEntry.list_type == list_type,
-    )
-    total_results = (
-        select(func.count())
-        .select_from(UserMovieEntry)
-        .where(*list_filters)
-        .correlate(User)
-        .scalar_subquery()
-    )
-    page_movies = (
+    ]
+    if q:
+        list_filters.append(Movie.title.icontains(q, autoescape=True))
+    if genre_id is not None:
+        list_filters.append(
+            select(MovieGenre.movie_id)
+            .where(MovieGenre.movie_id == Movie.id, MovieGenre.genre_id == genre_id)
+            .exists()
+        )
+
+    matching_movies = (
         select(
             Movie.id,
             Movie.tmdb_id,
@@ -85,10 +89,13 @@ async def get_visible_movie_list(
         .select_from(UserMovieEntry)
         .join(Movie, Movie.id == UserMovieEntry.movie_id)
         .where(*list_filters)
-        .order_by(UserMovieEntry.created_at.desc(), Movie.id.desc())
+        .correlate(User)
+    )
+    total_results = matching_movies.with_only_columns(func.count()).scalar_subquery()
+    page_movies = (
+        matching_movies.order_by(UserMovieEntry.created_at.desc(), Movie.id.desc())
         .offset((page - 1) * MOVIE_LIST_PAGE_SIZE)
         .limit(MOVIE_LIST_PAGE_SIZE)
-        .correlate(User)
         .lateral()
     )
     statement = (

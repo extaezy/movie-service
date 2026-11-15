@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from pydantic import StringConstraints
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_optional_current_user
@@ -22,6 +23,9 @@ router = APIRouter(tags=["lists"])
 MovieId = Annotated[int, Path(ge=1, le=2147483647)]
 DatabaseSession = Annotated[AsyncSession, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+MovieTitleSearch = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=200)
+]
 
 
 @router.post(
@@ -71,13 +75,28 @@ async def get_user_movie_list(
     session: DatabaseSession,
     response: Response,
     page: Annotated[int, Query(ge=1, le=2147483647)] = 1,
+    q: Annotated[
+        MovieTitleSearch | None, Query(description="Часть названия для списка watched")
+    ] = None,
+    genre_id: Annotated[
+        int | None,
+        Query(
+            ge=1, le=2147483647, description="Внутренний ID жанра для списка watched"
+        ),
+    ] = None,
 ) -> MovieListPage:
+    if list_type != "watched" and (q or genre_id is not None):
+        raise HTTPException(
+            422, "Поиск и фильтр по жанру доступны только для списка watched"
+        )
     movie_page = await get_visible_movie_list(
         session,
         username,
         list_type,
         viewer.id if viewer is not None else None,
         page=page,
+        q=q,
+        genre_id=genre_id,
     )
     if movie_page is None:
         raise HTTPException(

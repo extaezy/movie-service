@@ -1,0 +1,129 @@
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.tabsBar {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+}
+.tabBtn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 0;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+.tabBtn:hover,
+.tabBtn.activeTab {
+  color: #ffffff;
+}
+.tabBtn.activeTab::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #7c3aed;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 24px;
+}
+@media (min-width: 1280px) {
+  .grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+}
+.cardItem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.actionBtn {
+  width: 100%;
+  background-color: #1a1a24;
+  border: 1px solid rgba(124, 58, 237, 0.4);
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.actionBtn:hover {
+  background-color: #7c3aed;
+}
+.ratingBox {
+  width: 100%;
+}
+.ratingPicker {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  background-color: #1a1a24;
+  padding: 6px;
+  border-radius: 8px;
+}
+.rateNumBtn {
+  background-color: #0f0f14;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #9ca3af;
+  padding: 4px 0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rateNumBtn:hover,
+.rateNumBtn.activeRate {
+  background-color: #fbbf24;
+  color: #0f0f14;
+  border-color: #fbbf24;
+}
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+}
+.pageBtn {
+  background-color: #1a1a24;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.pageBtn:hover:not(:disabled) {
+  background-color: #7c3aed;
+}
+.pageBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pageInfo {
+  color: #9ca3af;
+  font-size: 14px;
+}

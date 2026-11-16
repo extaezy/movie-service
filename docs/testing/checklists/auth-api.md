@@ -32,17 +32,17 @@ AUTH-LOGIN-004 полностью покрыта T-AUTH-18–19: два обяз
 
 Отдельный запуск `pytest tests/test_auth_api.py -q` — **23 passed in 1.22s**. Ruff (`ruff check app tests --no-cache`) — **All checks passed!**
 
-Общий запуск после трёх учебных tests movies и нового auth-блока — **147 passed, 1 skipped, 1 xfailed in 5.77s**. Использована отдельная локальная PostgreSQL `movie_service_automation_test`. Пропущен отдельно включаемый `test_database_auth_with_rollback`, поскольку `MOVIE_SERVICE_RUN_DATABASE_SMOKE=0`; xfail относится к BR-MOV-001. Все 45 вариантов PostgreSQL integration прошли.
+Общий запуск после трёх тестов movies и нового auth-блока — **147 passed, 1 skipped, 1 xfailed in 5.77s**. Использована отдельная локальная PostgreSQL `movie_service_automation_test`. Пропущен отдельно включаемый `test_database_auth_with_rollback`, поскольку `MOVIE_SERVICE_RUN_DATABASE_SMOKE=0`; xfail относится к BR-MOV-001. Все 45 вариантов PostgreSQL integration прошли.
 
-## Новые темы для практики
+## Проверки JWT
 
-Фикстура `token_context` предоставляет тестовый ключ, UUID, действующий токен, шаблон claims и границы времени создания. Первое учебное задание выполнено в `test_access_token_has_expected_claims`: проверены подпись правильным ключом через PyJWT, HS256, обязательные поля, sub, целочисленные времена, срок 1800 секунд и границы iat. Отдельный запуск дал **1 passed in 0.02s**, Ruff прошёл.
+Фикстура `token_context` предоставляет тестовый ключ, UUID, действующий токен, шаблон claims и границы времени создания. В `test_access_token_has_expected_claims` проверены подпись правильным ключом через PyJWT, HS256, обязательные поля, sub, целочисленные времена, срок 1800 секунд и границы iat. Отдельный запуск дал **1 passed in 0.02s**, Ruff прошёл.
 
-Второе задание выполнено в `test_decode_rejects_invalid_token_times`: истёкший токен и токен с будущим iat, подписанные правильным ключом, отклоняются декодером приложения. На этом этапе файл JWT-тестов дал **3 passed in 0.05s**, включая первое задание; Ruff прошёл. Проверка HTTP-ответов для этих токенов добавлена позднее в T-AUTH-30.
+В `test_decode_rejects_invalid_token_times` проверено, что истёкший токен и токен с будущим iat, подписанные правильным ключом, отклоняются декодером приложения. На этом этапе файл JWT-тестов дал **3 passed in 0.05s**, включая проверку содержимого токена; Ruff прошёл. Проверка HTTP-ответов для этих токенов добавлена позднее в T-AUTH-30.
 
-Третье задание выполнено в `test_decode_rejects_invalid_token_credentials`: другой ключ, HS384 и отсутствие каждого из sub/iat/exp отклоняются декодером. Файл `test_tokens.py` дал **8 passed in 0.04s**.
+В `test_decode_rejects_invalid_token_credentials` проверено отклонение токенов с другим ключом, HS384 и отсутствием каждого из sub/iat/exp. Файл `test_tokens.py` дал **8 passed in 0.04s**.
 
-После практики T-AUTH-17 дополнен проверкой токена реального HTTP-входа: подпись, HS256, обязательные claims, UUID, точные целочисленные типы времени, срок 1800 секунд, границы момента выдачи и успешное `/auth/me` проверяются в одном сценарии. AUTH-TOKEN-001 пройдена на API с подменённым репозиторием.
+T-AUTH-17 дополнен проверкой токена реального HTTP-входа: подпись, HS256, обязательные claims, UUID, точные целочисленные типы времени, срок 1800 секунд, границы момента выдачи и успешное `/auth/me` проверяются в одном сценарии. AUTH-TOKEN-001 пройдена на API с подменённым репозиторием.
 
 T-AUTH-30 связывает неверные JWT с HTTP-контрактом: все девять вариантов дают безопасный 401 с WWW-Authenticate: Bearer до поиска пользователя. AUTH-ME-004–009 пройдены. JWT и auth API вместе дали **40 passed in 1.21s**, полный набор с PostgreSQL — **164 passed, 1 skipped, 1 xfailed in 4.54s**. Ruff прошёл. Пропущен только отдельно включаемый smoke, xfail — BR-MOV-001.
 

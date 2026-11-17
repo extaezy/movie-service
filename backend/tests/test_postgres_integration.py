@@ -881,6 +881,166 @@ async def records(database):
         return user.id, movie.id
 
 
+@pytest.fixture
+def rating_headers(records):
+    from app.core.tokens import create_access_token
+
+    user_id, _ = records
+    token = create_access_token(str(user_id))
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize("score", [1, 10])
+async def test_rating_api_accepts_score_boundaries(
+    client, database, records, rating_headers, score
+):
+    user_id, movie_id = records
+
+    response = await client.put(
+        f"/movies/{movie_id}/rating", json={"score": score}, headers=rating_headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"movie_id": movie_id, "score": score}
+    async with database.sessions() as session:
+        rating = await session.get(Rating, (user_id, movie_id))
+        assert rating is not None
+        assert rating.score == score
+
+
+@pytest.mark.parametrize(
+    "score",
+    [0, 11, 7.5, True],
+    ids=["below-minimum", "above-maximum", "fraction", "boolean"],
+)
+async def test_rating_api_rejects_invalid_scores(
+    client, database, records, rating_headers, score
+):
+    _, movie_id = records
+
+    response = await client.put(
+        f"/movies/{movie_id}/rating", json={"score": score}, headers=rating_headers
+    )
+
+    assert response.status_code == 422
+    async with database.sessions() as session:
+        assert (await session.scalars(select(Rating))).all() == []
+
+
+async def test_rating_api_updates_and_deletes_one_rating(
+    client, database, records, rating_headers
+):
+    user_id, movie_id = records
+    endpoint = f"/movies/{movie_id}/rating"
+
+    for score in (8, 6):
+        response = await client.put(
+            endpoint, json={"score": score}, headers=rating_headers
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"movie_id": movie_id, "score": score}
+        async with database.sessions() as session:
+            ratings = (await session.scalars(select(Rating))).all()
+            assert len(ratings) == 1
+            assert ratings[0].user_id == user_id
+            assert ratings[0].movie_id == movie_id
+            assert ratings[0].score == score
+        card = await client.get(f"/movies/{movie_id}")
+        assert card.status_code == 200
+        assert card.json()["average_rating"] == score
+        assert card.json()["ratings_count"] == 1
+
+    deleted = await client.delete(endpoint, headers=rating_headers)
+
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+    async with database.sessions() as session:
+        assert (await session.scalars(select(Rating))).all() == []
+    card = await client.get(f"/movies/{movie_id}")
+    assert card.status_code == 200
+    assert card.json()["average_rating"] is None
+    assert card.json()["ratings_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "method, payload", [("PUT", {"score": 9}), ("DELETE", None)]
+)
+async def test_rating_api_requires_authentication(
+    client, database, records, method, payload
+):
+    user_id, movie_id = records
+    async with database.sessions() as session, session.begin():
+        session.add(Rating(user_id=user_id, movie_id=movie_id, score=7))
+
+    response = await client.request(
+        method, f"/movies/{movie_id}/rating", json=payload
+    )
+
+    assert response.status_code == 401
+    async with database.sessions() as session:
+        rating = await session.get(Rating, (user_id, movie_id))
+        assert rating is not None
+        assert rating.score == 7
+
+
+async def test_rating_api_keeps_users_ratings_independent(
+    client, database, records, rating_headers
+):
+    from app.core.tokens import create_access_token
+
+    first_user_id, movie_id = records
+    async with database.sessions() as session, session.begin():
+        second_user = User(
+            username="second_rater",
+            email="second.rater@example.com",
+            hashed_password="test-only",
+        )
+        session.add(second_user)
+    second_token = create_access_token(str(second_user.id))
+    second_headers = {"Authorization": f"Bearer {second_token}"}
+    endpoint = f"/movies/{movie_id}/rating"
+
+    first_rating = await client.put(
+        endpoint, json={"score": 8}, headers=rating_headers
+    )
+    second_rating = await client.put(
+        endpoint, json={"score": 5}, headers=second_headers
+    )
+
+    assert first_rating.status_code == second_rating.status_code == 200
+    async with database.sessions() as session:
+        ratings = (await session.scalars(select(Rating))).all()
+        assert len(ratings) == 2
+        assert {rating.user_id: rating.score for rating in ratings} == {
+            first_user_id: 8,
+            second_user.id: 5,
+        }
+    card = await client.get(f"/movies/{movie_id}")
+    assert card.status_code == 200
+    assert card.json()["average_rating"] == 6.5
+    assert card.json()["ratings_count"] == 2
+
+    updated = await client.put(
+        endpoint, json={"score": 7}, headers=second_headers
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {"movie_id": movie_id, "score": 7}
+
+    deleted = await client.delete(endpoint, headers=second_headers)
+
+    assert deleted.status_code == 204
+    async with database.sessions() as session:
+        ratings = (await session.scalars(select(Rating))).all()
+        assert len(ratings) == 1
+        assert ratings[0].user_id == first_user_id
+        assert ratings[0].score == 8
+    card = await client.get(f"/movies/{movie_id}")
+    assert card.status_code == 200
+    assert card.json()["average_rating"] == 8
+    assert card.json()["ratings_count"] == 1
+
+
 @pytest.mark.parametrize("score", [0, 11, None])
 async def test_invalid_ratings_are_rejected(database, records, score):
     user_id, movie_id = records

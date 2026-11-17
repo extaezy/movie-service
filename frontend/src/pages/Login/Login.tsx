@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useToast } from '../../context/ToastContext';
-import { getApiErrorMessage } from '../../api/errors';
+import { loginApi } from '../../api/auth';
 import styles from './Login.module.css';
 
 export const Login: React.FC = () => {
@@ -26,11 +26,12 @@ export const Login: React.FC = () => {
 
     setLoading(true);
     try {
-      await login({ identifier, password });
+      const userData = await loginApi({ username_or_email: identifier, password });
+      login(userData);
       showToast('Успешный вход!');
       navigate('/');
-    } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Ошибка входа. Проверьте данные.'));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Ошибка входа. Проверьте данные.');
     } finally {
       setLoading(false);
     }

@@ -1,8 +1,8 @@
-import { httpClient } from './httpClient';
-import type { CurrentUser } from '../types';
+import { apiClient } from './client';
+import type { User } from '../types';
 
 export interface LoginCredentials {
-  identifier: string;
+  username_or_email: string;
   password: string;
 }
 
@@ -13,29 +13,11 @@ export interface RegisterData {
   password_confirm: string;
 }
 
-export interface RegisterResponse {
-  username: string;
-  email: string;
-}
-
-export interface TokenResponse {
-  access_token: string;
-  token_type: 'bearer';
-}
-
-export const loginApi = async (data: LoginCredentials): Promise<TokenResponse> => {
-  const response = await httpClient.post<TokenResponse>('/auth/login', data);
+export const loginApi = async (data: LoginCredentials): Promise<User> => {
+  const response = await apiClient.post<User>('/auth/login', data);
   return response.data;
 };
 
-export const getCurrentUserApi = async (token: string): Promise<CurrentUser> => {
-  const response = await httpClient.get<CurrentUser>('/auth/me', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return response.data;
-};
-
-export const registerApi = async (data: RegisterData): Promise<RegisterResponse> => {
-  const response = await httpClient.post<RegisterResponse>('/auth/register', data);
-  return response.data;
+export const registerApi = async (data: RegisterData): Promise<void> => {
+  await apiClient.post('/auth/register', data);
 };

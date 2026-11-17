@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { registerApi } from '../../api/auth';
-import { getApiErrorMessage } from '../../api/errors';
 import styles from './Register.module.css';
 
 export const Register: React.FC = () => {
@@ -45,8 +44,8 @@ export const Register: React.FC = () => {
       });
       showToast('Регистрация успешна');
       navigate('/login');
-    } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Ошибка регистрации. Попробуйте снова.'));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Ошибка регистрации. Попробуйте снова.');
     } finally {
       setLoading(false);
     }

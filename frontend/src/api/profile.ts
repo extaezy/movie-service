@@ -14,7 +14,6 @@ export interface UserReviewItem extends Review {
 }
 
 export interface UserProfile extends User {
-  is_private: boolean;
   is_friend?: boolean;
   pending_request?: boolean;
   lists?: {

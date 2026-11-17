@@ -1,11 +1,14 @@
-export interface User {
+export interface CurrentUser {
   id: string;
   username: string;
   email: string;
+}
+
+export interface User extends CurrentUser {
   display_name?: string;
   bio?: string;
   avatar_url?: string;
-  is_private: boolean;
+  is_private?: boolean;
 }
 
 export interface Movie {

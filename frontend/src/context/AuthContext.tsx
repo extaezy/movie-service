@@ -1,11 +1,18 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { isAxiosError } from 'axios';
 import type { User } from '../types';
-import { apiClient } from '../api/client';
+import { getCurrentUserApi, loginApi } from '../api/auth';
+import type { LoginCredentials } from '../api/auth';
+import { getApiErrorMessage } from '../api/errors';
+import { ErrorState } from '../components/ErrorState/ErrorState';
+import { Spinner } from '../components/Spinner/Spinner';
+
+const ACCESS_TOKEN_KEY = 'movie_service_access_token';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (user: User) => void;
+  login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -15,13 +22,27 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState('');
 
   const fetchUser = async () => {
+    setLoading(true);
+    setError('');
+
     try {
-      const response = await apiClient.get<User>('/auth/me');
-      setUser(response.data);
-    } catch {
-      setUser(null);
+      const token = sessionStorage.getItem(ACCESS_TOKEN_KEY);
+      if (!token) {
+        setUser(null);
+        return;
+      }
+
+      setUser(await getCurrentUserApi(token));
+    } catch (err: unknown) {
+      if (isAxiosError(err) && err.response?.status === 401) {
+        sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+        setUser(null);
+      } else {
+        setError(getApiErrorMessage(err, 'Не удалось загрузить текущего пользователя.'));
+      }
     } finally {
       setLoading(false);
     }
@@ -31,23 +52,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetchUser();
   }, []);
 
-  const login = (userData: User) => {
-    setUser(userData);
+  const login = async (credentials: LoginCredentials) => {
+    const { access_token } = await loginApi(credentials);
+    const currentUser = await getCurrentUserApi(access_token);
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, access_token);
+    setUser(currentUser);
   };
 
-  const logout = async () => {
-    try {
-      await apiClient.post('/auth/logout');
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setUser(null);
-    }
-  };
+  const logout = async () => {};
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, refreshUser: fetchUser }}>
-      {children}
+      {loading ? <Spinner /> : error ? <ErrorState message={error} onRetry={fetchUser} /> : children}
     </AuthContext.Provider>
   );
 };

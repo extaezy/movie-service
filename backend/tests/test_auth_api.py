@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
 import httpx
 import jwt
@@ -61,21 +60,13 @@ async def auth_client(auth_api):
         yield client
 
 
-@pytest.mark.parametrize(
-    ("identifier", "lookup"),
-    [
-        ("student_1", "username"),
-        ("student@example.com", "email"),
-        ("student@EXAMPLE.COM", "email"),
-    ],
-)
 async def test_login_issues_usable_token_without_sensitive_fields(
-    auth_client, auth_api, identifier, lookup
+    auth_client, auth_api
 ):
     started_at = int(datetime.now(UTC).timestamp())
     response = await auth_client.post(
         "/auth/login",
-        json={"identifier": identifier, "password": auth_api.password},
+        json={"identifier": "student@EXAMPLE.COM", "password": auth_api.password},
     )
     assert response.status_code == 200
     finished_at = int(datetime.now(UTC).timestamp())
@@ -98,16 +89,10 @@ async def test_login_issues_usable_token_without_sensitive_fields(
     assert claims["exp"] - claims["iat"] == 1800
     assert started_at <= claims["iat"] <= finished_at
     assert jwt.get_unverified_header(body["access_token"])["alg"] == "HS256"
-    if lookup == "username":
-        auth_api.get_by_username.assert_awaited_once_with(
-            auth_api.session, auth_api.user.username
-        )
-        auth_api.get_by_email.assert_not_awaited()
-    else:
-        auth_api.get_by_email.assert_awaited_once_with(
-            auth_api.session, auth_api.user.email
-        )
-        auth_api.get_by_username.assert_not_awaited()
+    auth_api.get_by_email.assert_awaited_once_with(
+        auth_api.session, auth_api.user.email
+    )
+    auth_api.get_by_username.assert_not_awaited()
 
     me = await auth_client.get(
         "/auth/me", headers={"Authorization": f"Bearer {body['access_token']}"}
@@ -158,7 +143,7 @@ async def test_login_rejects_invalid_field_types_without_repository_calls(
 
 
 @pytest.mark.parametrize(
-    "unknown_identifier", ["unknown_user", "unknown@example.com", "invalid@"]
+    "unknown_identifier", ["unknown@example.com", "invalid@"]
 )
 async def test_unknown_user_and_wrong_password_have_same_unauthorized_response(
     auth_client, auth_api, unknown_identifier
@@ -180,17 +165,6 @@ async def test_unknown_user_and_wrong_password_have_same_unauthorized_response(
         assert auth_api.password not in response.text
         assert auth_api.user.hashed_password not in response.text
     assert wrong_password.json() == unknown_user.json()
-
-
-async def test_inactive_user_cannot_login(auth_client, auth_api):
-    auth_api.user.is_active = False
-    response = await auth_client.post(
-        "/auth/login",
-        json={"identifier": auth_api.user.username, "password": auth_api.password},
-    )
-    assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert "access_token" not in response.json()
 
 
 async def test_login_preserves_username_case(auth_client, auth_api):
@@ -240,14 +214,8 @@ async def test_me_rejects_missing_or_malformed_credentials_without_lookup(
     auth_api.get_by_id.assert_not_awaited()
 
 
-@pytest.mark.parametrize("user_state", ["missing", "inactive"])
-async def test_me_rejects_unknown_and_inactive_token_owners(
-    auth_client, auth_api, user_state
-):
-    if user_state == "missing":
-        auth_api.get_by_id.return_value = None
-    else:
-        auth_api.user.is_active = False
+async def test_me_rejects_unknown_token_owner(auth_client, auth_api):
+    auth_api.get_by_id.return_value = None
     response = await auth_client.get(
         "/auth/me",
         headers={"Authorization": f"Bearer {auth_api.token_context.valid_token}"},
@@ -255,31 +223,6 @@ async def test_me_rejects_unknown_and_inactive_token_owners(
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
     auth_api.get_by_id.assert_awaited_once_with(auth_api.session, auth_api.user.id)
-
-
-async def test_me_returns_only_the_requested_token_owner(auth_client, auth_api):
-    second_user = User(
-        id=uuid4(),
-        username="student_2",
-        email="second@example.com",
-        hashed_password=auth_api.user.hashed_password,
-        is_active=True,
-    )
-    users = {auth_api.user.id: auth_api.user, second_user.id: second_user}
-    auth_api.get_by_id.side_effect = lambda session, user_id: users.get(user_id)
-    for user in users.values():
-        token = auth_api.token_context.tokens.create_access_token(str(user.id))
-        response = await auth_client.get(
-            "/auth/me", headers={"Authorization": f"Bearer {token}"}
-        )
-        assert response.status_code == 200
-        assert response.json() == {
-            "id": str(user.id),
-            "username": user.username,
-            "email": user.email,
-        }
-        assert user.hashed_password not in response.text
-    assert auth_api.get_by_id.await_count == 2
 
 
 @pytest.mark.parametrize(

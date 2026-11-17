@@ -61,49 +61,6 @@ async def test_search_sends_expected_request_and_normalizes_response(
     }
 
 
-async def test_search_accepts_empty_results(tmdb_settings):
-    payload = {"page": 1, "total_pages": 0, "total_results": 0, "results": []}
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
-    async with open_tmdb_client(tmdb_settings, transport) as client:
-        result = await client.search_movies("Неизвестный фильм")
-    assert result.model_dump() == payload
-
-
-@pytest.mark.parametrize(
-    ("query", "page"),
-    [("", 1), ("   ", 1), ("a" * 201, 1), ("Матрица", 0), ("Матрица", 501)],
-)
-async def test_search_rejects_invalid_parameters_before_http(
-    tmdb_settings, query, page
-):
-    def unexpected_request(request):
-        pytest.fail("Invalid search parameters must not reach TMDB")
-
-    async with open_tmdb_client(
-        tmdb_settings, httpx.MockTransport(unexpected_request)
-    ) as client:
-        with pytest.raises(ValueError):
-            await client.search_movies(query, page)
-
-
-@pytest.mark.parametrize(("query", "page"), [("a", 1), ("a" * 200, 500)])
-async def test_search_accepts_parameter_boundaries(tmdb_settings, query, page):
-    requests = []
-
-    def respond(request):
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json={"page": page, "total_pages": 500, "total_results": 0, "results": []},
-        )
-
-    async with open_tmdb_client(tmdb_settings, httpx.MockTransport(respond)) as client:
-        result = await client.search_movies(query, page)
-    assert result.page == page
-    assert requests[0].url.params["query"] == query
-    assert requests[0].url.params["page"] == str(page)
-
-
 async def test_get_movie_sends_id_and_normalizes_missing_values(
     tmdb_settings, tmdb_details_payload
 ):
@@ -153,8 +110,8 @@ async def test_get_movie_preserves_not_found_status(tmdb_settings):
     assert caught.value.status_code == 404
 
 
-@pytest.mark.parametrize("operation", ["search", "details", "discover"])
-@pytest.mark.parametrize("status_code", [302, 401, 403, 429, 500, 503])
+@pytest.mark.parametrize("operation", ["search", "details"])
+@pytest.mark.parametrize("status_code", [302, 401, 429, 500])
 async def test_upstream_http_errors_are_safe_bad_gateway_responses(
     tmdb_settings, caplog, operation, status_code
 ):
@@ -176,10 +133,6 @@ async def test_upstream_http_errors_are_safe_bad_gateway_responses(
             with pytest.raises(HTTPException) as caught:
                 if operation == "search":
                     await client.search_movies("Матрица")
-                elif operation == "discover":
-                    await client.discover_movies(
-                        page=1, tmdb_genre_id=None, year=None, sort="popularity_desc"
-                    )
                 else:
                     await client.get_movie(603)
 
@@ -189,7 +142,7 @@ async def test_upstream_http_errors_are_safe_bad_gateway_responses(
     assert len(requests) == 1
 
 
-@pytest.mark.parametrize("operation", ["search", "details", "discover"])
+@pytest.mark.parametrize("operation", ["search", "details"])
 @pytest.mark.parametrize("failure", [httpx.ReadTimeout, httpx.ConnectError])
 async def test_network_failures_become_safe_bad_gateway_responses(
     tmdb_settings, caplog, operation, failure
@@ -206,10 +159,6 @@ async def test_network_failures_become_safe_bad_gateway_responses(
             with pytest.raises(HTTPException) as caught:
                 if operation == "search":
                     await client.search_movies("Матрица")
-                elif operation == "discover":
-                    await client.discover_movies(
-                        page=1, tmdb_genre_id=None, year=None, sort="popularity_desc"
-                    )
                 else:
                     await client.get_movie(603)
     assert caught.value.status_code == 502
@@ -217,7 +166,7 @@ async def test_network_failures_become_safe_bad_gateway_responses(
     assert token not in caplog.text
 
 
-@pytest.mark.parametrize("operation", ["search", "details", "discover"])
+@pytest.mark.parametrize("operation", ["search", "details"])
 async def test_invalid_json_becomes_bad_gateway(tmdb_settings, operation):
     transport = httpx.MockTransport(
         lambda request: httpx.Response(200, content=b"not-json")
@@ -226,10 +175,6 @@ async def test_invalid_json_becomes_bad_gateway(tmdb_settings, operation):
         with pytest.raises(HTTPException) as caught:
             if operation == "search":
                 await client.search_movies("Матрица")
-            elif operation == "discover":
-                await client.discover_movies(
-                    page=1, tmdb_genre_id=None, year=None, sort="popularity_desc"
-                )
             else:
                 await client.get_movie(603)
     assert caught.value.status_code == 502

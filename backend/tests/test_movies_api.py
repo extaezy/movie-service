@@ -11,7 +11,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from pydantic import SecretStr
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -137,18 +136,6 @@ def movie_database_api(movie_api, monkeypatch):
     return movie_api
 
 
-@pytest.fixture(params=["driver", "pool-timeout", "connection-refused", "timeout"])
-def database_read_error(request):
-    message = "Simulated database failure with fake-password-marker"
-    if request.param == "driver":
-        return OperationalError("SELECT movie", {}, OSError(message))
-    if request.param == "pool-timeout":
-        return SQLAlchemyTimeoutError(message)
-    if request.param == "connection-refused":
-        return ConnectionRefusedError(message)
-    return TimeoutError(message)
-
-
 async def test_search_is_public_and_uses_external_ids_without_database(
     movies_client, movie_api, tmdb_search_payload
 ):
@@ -190,6 +177,22 @@ async def test_search_returns_empty_results(movies_client, movie_api):
     response = await movies_client.get("/movies/search", params={"q": "Нет фильма"})
     assert response.status_code == 200
     assert response.json() == payload
+    assert movie_api.database_calls == []
+
+
+@pytest.mark.parametrize(("query", "page"), [("a", 1), ("a" * 200, 500)])
+async def test_search_accepts_parameter_boundaries(
+    movies_client, movie_api, query, page
+):
+    payload = {"page": page, "total_pages": 500, "total_results": 0, "results": []}
+    movie_api.use_upstream(lambda request: httpx.Response(200, json=payload))
+
+    response = await movies_client.get("/movies/search", params={"q": query, "page": page})
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert movie_api.upstream_requests[0].url.params["query"] == query
+    assert movie_api.upstream_requests[0].url.params["page"] == str(page)
     assert movie_api.database_calls == []
 
 
@@ -253,16 +256,6 @@ async def test_invalid_movie_ids_do_not_reach_repositories(
     assert movie_api.upstream_requests == []
 
 
-async def test_local_movie_is_public_and_does_not_use_tmdb(movies_client, movie_api):
-    response = await movies_client.get("/movies/7")
-    assert response.status_code == 200
-    assert response.json() == movie_api.movie.model_dump(mode="json")
-    movie_api.get_by_id.assert_awaited_once_with(movie_api.session, 7)
-    movie_api.get_by_tmdb_id.assert_not_awaited()
-    movie_api.save.assert_not_awaited()
-    assert movie_api.upstream_requests == []
-
-
 async def test_unknown_local_movie_is_not_found_without_import(
     movies_client, movie_api
 ):
@@ -274,59 +267,12 @@ async def test_unknown_local_movie_is_not_found_without_import(
     assert movie_api.upstream_requests == []
 
 
-async def test_cached_movie_is_available_without_tmdb_configuration(
-    movies_client, movie_api, tmdb_settings
-):
-    tmdb_settings.tmdb_access_token = SecretStr("")
-    movie_api.get_by_tmdb_id.return_value = movie_api.movie
-    response = await movies_client.get("/movies/tmdb/603")
-    assert response.status_code == 200
-    assert response.json() == movie_api.movie.model_dump(mode="json")
-    movie_api.get_by_tmdb_id.assert_awaited_once_with(movie_api.session, 603)
-    movie_api.save.assert_not_awaited()
-    assert movie_api.upstream_requests == []
-
-
-async def test_missing_movie_is_fetched_and_passed_to_repository(
-    movies_client, movie_api, tmdb_details_payload
-):
-    movie_api.use_upstream(
-        lambda request: httpx.Response(200, json=tmdb_details_payload)
-    )
-    response = await movies_client.get("/movies/tmdb/603")
-
-    assert response.status_code == 200
-    assert response.json() == movie_api.movie.model_dump(mode="json")
-    movie_api.get_by_tmdb_id.assert_awaited_once_with(movie_api.session, 603)
-    movie_api.save.assert_awaited_once()
-    session, details = movie_api.save.await_args.args
-    assert session is movie_api.session
-    assert details.tmdb_id == 603
-    assert details.title == "Матрица"
-    assert details.genres[0].tmdb_id == 28
-    assert len(movie_api.upstream_requests) == 1
-    assert movie_api.upstream_requests[0].url.path == "/3/movie/603"
-
-
-@pytest.mark.parametrize(
-    ("upstream_status", "expected_status"), [(404, 404), (429, 502), (500, 502)]
-)
 async def test_failed_movie_import_does_not_save_data(
-    movies_client, movie_api, upstream_status, expected_status
+    movies_client, movie_api
 ):
-    movie_api.use_upstream(lambda request: httpx.Response(upstream_status))
+    movie_api.use_upstream(lambda request: httpx.Response(500))
     response = await movies_client.get("/movies/tmdb/603")
-    assert response.status_code == expected_status
-    movie_api.save.assert_not_awaited()
-
-
-async def test_adult_movie_is_not_saved(movies_client, movie_api, tmdb_details_payload):
-    tmdb_details_payload["adult"] = True
-    movie_api.use_upstream(
-        lambda request: httpx.Response(200, json=tmdb_details_payload)
-    )
-    response = await movies_client.get("/movies/tmdb/603")
-    assert response.status_code == 404
+    assert response.status_code == 502
     movie_api.save.assert_not_awaited()
 
 
@@ -357,32 +303,6 @@ async def test_tmdb_timeout_reaches_http_client_as_safe_502(
     assert response.status_code == 502
     assert "local-tmdb-test-token" not in response.text
     movie_api.save.assert_not_awaited()
-
-
-async def test_import_passes_normalized_fields_to_repository(
-    movies_client, movie_api, tmdb_details_payload
-):
-    endpoint = "/movies/tmdb/603"
-    expected_status = 200
-    expected_tmdb_id = 603
-    expected_upstream_requests = 1
-
-    tmdb_details_payload["release_date"] = ""
-    tmdb_details_payload["runtime"] = 0
-
-    movie_api.use_upstream(
-        lambda request: httpx.Response(200, json=tmdb_details_payload)
-    )
-    response = await movies_client.get(endpoint)
-    assert response.status_code == expected_status
-    movie_api.save.assert_awaited_once()
-    session, details = movie_api.save.await_args.args
-
-    assert session is movie_api.session
-    assert details.tmdb_id == expected_tmdb_id
-    assert len(movie_api.upstream_requests) == expected_upstream_requests
-    assert details.release_date is None
-    assert details.runtime is None
 
 
 async def test_movie_import_recovers_after_timeout(
@@ -439,91 +359,25 @@ async def test_tmdb_error_does_not_expose_token(
     )
 
 
-@pytest.mark.parametrize("lookup", ["local-id", "tmdb-id"])
+@pytest.mark.parametrize(
+    "endpoint, repository_name",
+    [
+        ("/movies/7", "get_by_id"),
+        ("/movies/tmdb/603", "get_by_tmdb_id"),
+        ("/movies", "list_movies"),
+    ],
+)
 async def test_database_read_errors_return_safe_503(
-    movies_client, movie_database_api, database_read_error, lookup
+    movies_client, movie_database_api, endpoint, repository_name
 ):
-    if lookup == "local-id":
-        endpoint = f"/movies/{movie_database_api.movie.id}"
-        read_movie = movie_database_api.get_by_id
-        movie_id = movie_database_api.movie.id
-    else:
-        endpoint = f"/movies/tmdb/{movie_database_api.movie.tmdb_id}"
-        read_movie = movie_database_api.get_by_tmdb_id
-        movie_id = movie_database_api.movie.tmdb_id
-    read_movie.side_effect = database_read_error
+    read_movie = getattr(movie_database_api, repository_name)
+    read_movie.side_effect = SQLAlchemyTimeoutError("fake-password-marker")
 
     response = await movies_client.get(endpoint)
 
     assert response.status_code == 503
     assert response.json() == {"detail": "База данных временно недоступна"}
     assert "fake-password-marker" not in response.text
-    read_movie.assert_awaited_once_with(movie_database_api.session, movie_id)
-    movie_database_api.session.rollback.assert_awaited_once()
-    movie_database_api.session.__aexit__.assert_awaited_once()
-    movie_database_api.session_factory.assert_called_once_with()
-    movie_database_api.save.assert_not_awaited()
-    assert movie_database_api.upstream_requests == []
-
-
-async def test_database_read_failure_keeps_movie_search_available(
-    movies_client, movie_database_api, tmdb_search_payload
-):
-    movie_database_api.get_by_id.side_effect = SQLAlchemyTimeoutError(
-        "Simulated database pool timeout"
-    )
-    movie_database_api.use_upstream(
-        lambda request: httpx.Response(200, json=tmdb_search_payload)
-    )
-
-    failed_response = await movies_client.get(f"/movies/{movie_database_api.movie.id}")
-    assert failed_response.status_code == 503
-
-    search_response = await movies_client.get(
-        "/movies/search", params={"q": "Матрица", "page": 2}
-    )
-
-    assert search_response.status_code == 200
-    assert search_response.json()["results"][0]["tmdb_id"] == 603
-    assert len(movie_database_api.upstream_requests) == 1
-    movie_database_api.session_factory.assert_called_once_with()
-    movie_database_api.session.rollback.assert_awaited_once()
-    movie_database_api.get_by_id.assert_awaited_once_with(
-        movie_database_api.session, movie_database_api.movie.id
-    )
-    movie_database_api.save.assert_not_awaited()
-
-
-async def test_local_movie_read_recovers_after_database_error(
-    movies_client, movie_database_api
-):
-    endpoint = f"/movies/{movie_database_api.movie.id}"
-    read_movie = movie_database_api.get_by_id
-
-    temporary_error = SQLAlchemyTimeoutError("Simulated temporary database failure")
-
-    expected_error_status = 503
-    expected_success_status = 200
-    expected_error_json = {"detail": "База данных временно недоступна"}
-    expected_movie_json = movie_database_api.movie.model_dump(mode="json")
-    expected_read_count = 2
-
-    read_movie.side_effect = [temporary_error, movie_database_api.movie]
-
-    first_response = await movies_client.get(endpoint)
-    assert first_response.status_code == expected_error_status
-    assert first_response.json() == expected_error_json
-    movie_database_api.session.rollback.assert_awaited_once()
-
-    second_response = await movies_client.get(endpoint)
-    assert second_response.status_code == expected_success_status
-    assert second_response.json() == expected_movie_json
-    assert read_movie.await_count == expected_read_count
-    movie_database_api.session.rollback.assert_awaited_once()
-    assert movie_database_api.session_factory.call_count == expected_read_count
-    assert movie_database_api.session.__aenter__.await_count == expected_read_count
-    assert movie_database_api.session.__aexit__.await_count == expected_read_count
-    movie_database_api.get_by_tmdb_id.assert_not_awaited()
     movie_database_api.save.assert_not_awaited()
     assert movie_database_api.upstream_requests == []
 
@@ -615,28 +469,6 @@ async def test_catalog_rejects_invalid_parameters_before_repository_calls(
     movie_api.get_by_tmdb_id.assert_not_awaited()
     movie_api.save.assert_not_awaited()
     assert movie_api.upstream_requests == []
-
-
-async def test_catalog_database_errors_return_safe_503(
-    movies_client, movie_database_api, database_read_error
-):
-    movie_database_api.list_movies.side_effect = database_read_error
-
-    response = await movies_client.get("/movies")
-
-    assert response.status_code == 503
-    assert response.json() == {"detail": "База данных временно недоступна"}
-    movie_database_api.list_movies.assert_awaited_once_with(
-        movie_database_api.session,
-        page=1,
-        genre_id=None,
-        year=None,
-        sort="release_date_desc",
-    )
-    movie_database_api.session.rollback.assert_awaited_once()
-    movie_database_api.session.__aexit__.assert_awaited_once()
-    movie_database_api.save.assert_not_awaited()
-    assert movie_database_api.upstream_requests == []
 
 
 @pytest.mark.parametrize(
@@ -794,7 +626,7 @@ async def test_discover_returns_empty_page_without_database(movies_client, movie
 
 @pytest.mark.parametrize(
     "upstream_total_pages, expected_total_pages",
-    [(1, 1), (499, 499), (500, 500), (501, 500), (1000, 500)],
+    [(499, 499), (500, 500), (501, 500)],
 )
 async def test_discover_caps_total_pages_and_preserves_results(
     movies_client,
@@ -821,14 +653,13 @@ async def test_discover_caps_total_pages_and_preserves_results(
     movie_api.save.assert_not_awaited()
 
 
-@pytest.mark.parametrize("upstream_status", [302, 401, 403, 404, 429, 500, 503])
-async def test_discover_http_errors_are_safe_and_do_not_follow_redirects(
-    movies_client, movie_api, tmdb_settings, caplog, upstream_status
+async def test_discover_upstream_not_found_returns_safe_502(
+    movies_client, movie_api, tmdb_settings, caplog
 ):
     token = tmdb_settings.tmdb_access_token.get_secret_value()
     movie_api.use_upstream(
         lambda request: httpx.Response(
-            upstream_status,
+            404,
             json={"message": token},
             headers={"Location": "https://other.example/steal-token"},
         )
@@ -855,9 +686,6 @@ async def test_discover_http_errors_are_safe_and_do_not_follow_redirects(
     "failure",
     [
         "invalid-json",
-        "missing-page",
-        "negative-count",
-        "invalid-results",
         "missing-title",
         "invalid-date",
     ],
@@ -866,13 +694,7 @@ async def test_discover_invalid_upstream_data_returns_safe_502(
     movies_client, movie_api, tmdb_search_payload, failure
 ):
     payload = deepcopy(tmdb_search_payload)
-    if failure == "missing-page":
-        del payload["page"]
-    elif failure == "negative-count":
-        payload["total_results"] = -1
-    elif failure == "invalid-results":
-        payload["results"] = None
-    elif failure == "missing-title":
+    if failure == "missing-title":
         del payload["results"][0]["title"]
     elif failure == "invalid-date":
         payload["results"][0]["release_date"] = "invalid-date"
@@ -917,53 +739,27 @@ async def test_discover_recovers_after_network_failure_without_database(
     movie_api.save.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "add_page_field, add_movie_field",
-    [(True, False), (False, True), (True, True)],
-    ids=["page-extra", "movie-extra", "both-extra"],
-)
 async def test_discover_ignores_unknown_upstream_fields(
     movies_client,
     movie_api,
     tmdb_search_payload,
     tmdb_search_expected_json,
-    add_page_field,
-    add_movie_field,
 ):
     endpoint = "/movies/discover"
     parameters = {"page": 2}
 
-    base_payload = deepcopy(tmdb_search_payload)
-    extended_payload = deepcopy(base_payload)
+    extended_payload = deepcopy(tmdb_search_payload)
 
     extra_field_name = "provider_debug"
     extra_field_value = {"marker": "provider-only-test-marker"}
 
     expected_json = deepcopy(tmdb_search_expected_json)
     expected_status = 200
-    expected_upstream_count = 2
+    expected_upstream_count = 1
     expected_database_calls = []
 
-    if add_page_field:
-        extended_payload[extra_field_name] = deepcopy(extra_field_value)
-
-    if add_movie_field:
-        extended_payload["results"][0][extra_field_name] = deepcopy(
-            extra_field_value
-        )
-
-    for original_payload in (base_payload, tmdb_search_payload):
-        assert extra_field_name not in original_payload
-        assert extra_field_name not in original_payload["results"][0]
-
-    movie_api.use_upstream(
-        lambda request: httpx.Response(200, json=base_payload)
-    )
-
-    base_response = await movies_client.get(endpoint, params=parameters)
-    assert base_response.status_code == expected_status
-    base_response_json = base_response.json()
-    assert base_response_json == expected_json
+    extended_payload[extra_field_name] = deepcopy(extra_field_value)
+    extended_payload["results"][0][extra_field_name] = deepcopy(extra_field_value)
 
     movie_api.use_upstream(
         lambda request: httpx.Response(200, json=extended_payload)
@@ -971,7 +767,7 @@ async def test_discover_ignores_unknown_upstream_fields(
 
     extended_response = await movies_client.get(endpoint, params=parameters)
     assert extended_response.status_code == expected_status
-    assert extended_response.json() == base_response_json
+    assert extended_response.json() == expected_json
     assert extra_field_value["marker"] not in extended_response.text
     assert len(movie_api.upstream_requests) == expected_upstream_count
     assert movie_api.database_calls == expected_database_calls

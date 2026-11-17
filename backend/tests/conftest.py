@@ -94,14 +94,12 @@ def token_context(monkeypatch):
     user_id = uuid4()
     creation_started_at = int(datetime.now(UTC).timestamp())
     valid_token = tokens.create_access_token(str(user_id))
-    creation_finished_at = int(datetime.now(UTC).timestamp())
     return SimpleNamespace(
         tokens=tokens,
         secret=secret,
         user_id=user_id,
         valid_token=valid_token,
         creation_started_at=creation_started_at,
-        creation_finished_at=creation_finished_at,
         claims={
             "sub": str(user_id),
             "iat": creation_started_at,

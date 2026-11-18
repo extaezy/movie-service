@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { isAxiosError } from 'axios';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '../../components/Spinner/Spinner';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { useToast } from '../../context/ToastContext';
+import { getApiErrorMessage } from '../../api/errors';
 import {
+  getDemoMovieDetailApi,
   getMovieDetailApi,
+  openTmdbMovieApi,
   rateMovieApi,
   setMovieStatusApi,
   saveReviewApi,
@@ -13,11 +17,22 @@ import {
 import type { MovieDetail } from '../../api/movieDetail';
 import styles from './Movie.module.css';
 
-export const MoviePage: React.FC = () => {
+interface MoviePageProps {
+  source?: 'catalog' | 'tmdb' | 'demo';
+}
+
+const releaseDateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' });
+const ratingFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
+
+export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const isDemo = source === 'demo';
   const [movie, setMovie] = useState<MovieDetail | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [errorType, setErrorType] = useState<'404' | 'server' | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   // Рецензия локальное состояние формы
   const [reviewText, setReviewText] = useState<string>('');
@@ -26,35 +41,54 @@ export const MoviePage: React.FC = () => {
 
   const { showToast } = useToast();
 
-  const fetchMovie = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    setErrorType(null);
-    try {
-      const data = await getMovieDetailApi(id);
-      setMovie(data);
-      if (data.user_review) {
-        setReviewText(data.user_review.text);
-        setIsSpoiler(data.user_review.is_spoiler);
-      }
-    } catch (err: any) {
-      if (err.response?.status === 404) {
-        setErrorType('404');
-      } else {
-        setErrorType('server');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
+  const fetchMovie = () => setAttempt((previous) => previous + 1);
 
   useEffect(() => {
-    fetchMovie();
-  }, [fetchMovie]);
+    setLoading(true);
+    setNotFound(false);
+    setError('');
+    setMovie(null);
+
+    if (!id || (!isDemo && (!/^\d+$/.test(id) || Number(id) < 1 || Number(id) > 2147483647))) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const { signal } = controller;
+    const handleError = (requestError: unknown) => {
+      if (signal.aborted) return;
+      if (isAxiosError(requestError) && requestError.response?.status === 404) {
+        setNotFound(true);
+      } else {
+        setError(getApiErrorMessage(requestError, 'Не удалось загрузить фильм.'));
+      }
+      setLoading(false);
+    };
+
+    if (source === 'tmdb') {
+      openTmdbMovieApi(id, signal)
+        .then((movieId) => {
+          if (!signal.aborted) navigate(`/movies/${movieId}`, { replace: true });
+        })
+        .catch(handleError);
+    } else {
+      const request = isDemo ? getDemoMovieDetailApi(id, signal) : getMovieDetailApi(id, signal);
+      request.then((data) => {
+        if (signal.aborted) return;
+        setMovie(data);
+        setReviewText(data.user_review?.text ?? '');
+        setIsSpoiler(data.user_review?.is_spoiler ?? false);
+        setLoading(false);
+      }).catch(handleError);
+    }
+    return () => controller.abort();
+  }, [id, source, isDemo, navigate, attempt]);
 
   // Обработка рейтинга
   const handleRate = async (rating: number | null) => {
-    if (!id) return;
+    if (!id || !isDemo) return;
     try {
       await rateMovieApi(id, rating);
       setMovie((prev) => (prev ? { ...prev, user_rating: rating } : null));
@@ -66,7 +100,7 @@ export const MoviePage: React.FC = () => {
 
   // Обработка статуса (watchlist, watched, favorite)
   const handleStatusChange = async (status: 'watchlist' | 'watched' | 'favorite') => {
-    if (!id || !movie) return;
+    if (!id || !movie || !isDemo) return;
     const newStatus = movie.user_status === status ? null : status;
     try {
       await setMovieStatusApi(id, newStatus);
@@ -80,7 +114,7 @@ export const MoviePage: React.FC = () => {
   // Сохранение рецензии
   const handleSaveReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !reviewText.trim()) return;
+    if (!id || !isDemo || !reviewText.trim()) return;
     try {
       await saveReviewApi(id, reviewText, isSpoiler);
       setMovie((prev) =>
@@ -101,7 +135,7 @@ export const MoviePage: React.FC = () => {
 
   // Удаление рецензии
   const handleDeleteReview = async () => {
-    if (!id) return;
+    if (!id || !isDemo) return;
     try {
       await deleteReviewApi(id);
       setMovie((prev) => (prev ? { ...prev, user_review: null } : null));
@@ -115,20 +149,30 @@ export const MoviePage: React.FC = () => {
   };
 
   if (loading) return <Spinner />;
-  if (errorType === '404') return <ErrorState message="Фильм не найден" />;
-  if (errorType === 'server' || !movie) return <ErrorState onRetry={fetchMovie} />;
+  if (notFound) return <ErrorState message="Фильм не найден" />;
+  if (!movie) return <ErrorState message={error} onRetry={fetchMovie} />;
+
+  const releaseDate = movie.release_date ? releaseDateFormat.format(new Date(movie.release_date)) : movie.year;
 
   return (
     <div className={styles.container}>
       {/* Основная информация */}
       <div className={styles.heroSection}>
         <div className={styles.posterWrapper}>
-          <img src={movie.poster_url || '/placeholder.png'} alt={movie.title} className={styles.poster} />
+          {movie.poster_url && (
+            <img
+              key={movie.poster_url}
+              src={movie.poster_url}
+              alt={movie.title}
+              className={styles.poster}
+              onError={(event) => { event.currentTarget.hidden = true; }}
+            />
+          )}
         </div>
         <div className={styles.meta}>
           <h1 className={styles.title}>{movie.title}</h1>
           <div className={styles.detailsRow}>
-            <span className={styles.year}>{movie.year}</span>
+            {releaseDate && <span className={styles.year}>{releaseDate}</span>}
             {movie.duration && <span className={styles.duration}>{movie.duration} мин.</span>}
           </div>
           <div className={styles.genres}>
@@ -139,23 +183,40 @@ export const MoviePage: React.FC = () => {
             ))}
           </div>
           <p className={styles.description}>{movie.description || 'Описание отсутствует.'}</p>
+          {!isDemo && (
+            <div className={styles.detailsRow}>
+              <span>
+                Рейтинг TMDB {movie.tmdb_vote_average == null
+                  ? '— нет оценок'
+                  : `${ratingFormat.format(movie.tmdb_vote_average)}/10 (голосов: ${movie.tmdb_vote_count})`}
+              </span>
+              <span>
+                Рейтинг Movie Service {movie.average_rating == null
+                  ? '— нет оценок'
+                  : `${ratingFormat.format(movie.average_rating)}/10 (голосов: ${movie.ratings_count})`}
+              </span>
+            </div>
+          )}
 
           {/* Блок добавления в список */}
           <div className={styles.statusTabs}>
             <button
               className={`${styles.statusBtn} ${movie.user_status === 'watchlist' ? styles.activeStatus : ''}`}
+              disabled={!isDemo}
               onClick={() => handleStatusChange('watchlist')}
             >
               Планирую посмотреть
             </button>
             <button
               className={`${styles.statusBtn} ${movie.user_status === 'watched' ? styles.activeStatus : ''}`}
+              disabled={!isDemo}
               onClick={() => handleStatusChange('watched')}
             >
               Просмотрено
             </button>
             <button
               className={`${styles.statusBtn} ${movie.user_status === 'favorite' ? styles.activeStatus : ''}`}
+              disabled={!isDemo}
               onClick={() => handleStatusChange('favorite')}
             >
               Любимое
@@ -175,6 +236,7 @@ export const MoviePage: React.FC = () => {
                 <button
                   key={num}
                   className={`${styles.rateBtn} ${movie.user_rating === num ? styles.activeRate : ''}`}
+                  disabled={!isDemo}
                   onClick={() => handleRate(num)}
                 >
                   {num}
@@ -212,17 +274,19 @@ export const MoviePage: React.FC = () => {
                   value={reviewText}
                   onChange={(e) => setReviewText(e.target.value)}
                   rows={4}
+                  disabled={!isDemo}
                 />
                 <label className={styles.checkboxLabel}>
                   <input
                     type="checkbox"
                     checked={isSpoiler}
+                    disabled={!isDemo}
                     onChange={(e) => setIsSpoiler(e.target.checked)}
                   />
                   Содержит спойлеры
                 </label>
                 <div className={styles.formButtons}>
-                  <button type="submit" className={styles.saveBtn}>
+                  <button type="submit" className={styles.saveBtn} disabled={!isDemo}>
                     Сохранить
                   </button>
                   {movie.user_review && (
@@ -259,7 +323,7 @@ export const MoviePage: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <p className={styles.emptyText}>Пока нет рецензий от пользователей</p>
+              <p className={styles.emptyText}>{isDemo ? 'Пока нет рецензий от пользователей' : 'Рецензии пользователей пока не подключены'}</p>
             )}
           </div>
 
@@ -283,7 +347,7 @@ export const MoviePage: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <p className={styles.emptyText}>Пока нет рецензий критиков</p>
+              <p className={styles.emptyText}>{isDemo ? 'Пока нет рецензий критиков' : 'Рецензии критиков пока не подключены'}</p>
             )}
           </div>
         </div>

@@ -1,4 +1,7 @@
 import { apiClient } from './client';
+import { httpClient } from './httpClient';
+import { getTmdbPosterUrl } from './movies';
+import type { TmdbGenre, TmdbMovie } from './movies';
 import type { Movie } from '../types';
 
 export interface Review {
@@ -22,7 +25,13 @@ export interface CriticReview {
   url: string;
 }
 
-export interface MovieDetail extends Movie {
+export interface MovieDetail extends Omit<Movie, 'year'> {
+  year?: number;
+  release_date?: string;
+  average_rating?: number | null;
+  ratings_count?: number;
+  tmdb_vote_average?: number | null;
+  tmdb_vote_count?: number | null;
   duration?: number;
   description?: string;
   user_rating?: number | null;
@@ -36,8 +45,43 @@ export interface MovieDetail extends Movie {
   critic_reviews: CriticReview[];
 }
 
-export const getMovieDetailApi = async (id: string): Promise<MovieDetail> => {
-  const response = await apiClient.get<MovieDetail>(`/movies/${id}`);
+interface MovieDetailResponse extends Omit<TmdbMovie, 'genre_ids'> {
+  id: number;
+  runtime: number | null;
+  genres: (TmdbGenre & { id: number })[];
+  average_rating: number | null;
+  ratings_count: number;
+  tmdb_vote_average: number | null;
+  tmdb_vote_count: number | null;
+  tmdb_rating_updated_at: string | null;
+}
+
+export const openTmdbMovieApi = async (id: string, signal: AbortSignal): Promise<number> => {
+  const response = await httpClient.get<MovieDetailResponse>(`/movies/tmdb/${id}`, { signal });
+  return response.data.id;
+};
+
+export const getMovieDetailApi = async (id: string, signal: AbortSignal): Promise<MovieDetail> => {
+  const { data } = await httpClient.get<MovieDetailResponse>(`/movies/${id}`, { signal });
+  return {
+    id: String(data.id),
+    title: data.title,
+    release_date: data.release_date ?? undefined,
+    poster_url: getTmdbPosterUrl(data.poster_path),
+    genres: data.genres.map(({ name }) => name),
+    duration: data.runtime ?? undefined,
+    description: data.overview ?? undefined,
+    average_rating: data.average_rating,
+    ratings_count: data.ratings_count,
+    tmdb_vote_average: data.tmdb_vote_average,
+    tmdb_vote_count: data.tmdb_vote_count,
+    reviews: [],
+    critic_reviews: [],
+  };
+};
+
+export const getDemoMovieDetailApi = async (id: string, signal: AbortSignal): Promise<MovieDetail> => {
+  const response = await apiClient.get<MovieDetail>(`/movies/${encodeURIComponent(id)}`, { signal });
   return response.data;
 };
 

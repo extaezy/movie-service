@@ -137,7 +137,7 @@ export const Lists: React.FC = () => {
           <div className={styles.grid}>
             {movies.map((movie) => (
               <div key={movie.id} className={styles.cardItem}>
-                <MovieCard movie={movie} onToggleFavorite={handleToggleFavorite} />
+                <MovieCard movie={movie} to={`/demo/movies/${movie.id}`} onToggleFavorite={handleToggleFavorite} />
 
                 {/* Действие для "Планирую посмотреть" */}
                 {currentType === 'watchlist' && (

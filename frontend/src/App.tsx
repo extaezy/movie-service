@@ -33,6 +33,8 @@ const AppLayout: React.FC = () => {
         <Routes>
           <Route path="/" element={<Catalog />} />
           <Route path="/movies/:id" element={<MoviePage />} />
+          <Route path="/movies/tmdb/:id" element={<MoviePage source="tmdb" />} />
+          <Route path="/demo/movies/:id" element={<MoviePage source="demo" />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/profile/:username" element={<Profile />} />

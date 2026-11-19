@@ -56,6 +56,77 @@ interface MovieDetailResponse extends Omit<TmdbMovie, 'genre_ids'> {
   tmdb_rating_updated_at: string | null;
 }
 
+interface MovieReviewResponse {
+  id: number;
+  movie_id: number;
+  text: string;
+  created_at: string;
+  contains_spoilers: boolean;
+}
+
+type MovieReviewInput = Pick<MovieReviewResponse, 'text' | 'contains_spoilers'>;
+
+interface MovieReviewsResponse {
+  page: number;
+  page_size: number;
+  total_results: number;
+  total_pages: number;
+  results: (MovieReviewResponse & { author_username: string })[];
+}
+
+export const getMovieReviewsApi = async (id: string, page: number, signal: AbortSignal) => {
+  const { data } = await httpClient.get<MovieReviewsResponse>(`/movies/${id}/reviews`, {
+    params: { page },
+    signal,
+  });
+  const reviews: Review[] = data.results.map((review) => ({
+    id: String(review.id),
+    author: { username: review.author_username },
+    text: review.text,
+    created_at: review.created_at,
+    is_spoiler: review.contains_spoilers,
+  }));
+  return { page: data.page, totalPages: data.total_pages, reviews };
+};
+
+export const createMovieReviewApi = async (
+  id: string,
+  review: MovieReviewInput,
+  token: string,
+  signal: AbortSignal,
+): Promise<MovieReviewResponse> => {
+  const { data } = await httpClient.post<MovieReviewResponse>(`/movies/${id}/reviews`, review, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
+  });
+  return data;
+};
+
+export const updateMovieReviewApi = async (
+  reviewId: string,
+  changes: Partial<MovieReviewInput>,
+  token: string,
+  signal: AbortSignal,
+) => {
+  const { data } = await httpClient.patch<MovieReviewResponse & { updated_at: string }>(
+    `/reviews/${reviewId}`,
+    changes,
+    { headers: { Authorization: `Bearer ${token}` }, signal },
+  );
+  return data;
+};
+
+export const removeMovieReviewApi = async (
+  reviewId: string,
+  token: string,
+  signal: AbortSignal,
+): Promise<void> => {
+  await httpClient.delete(`/reviews/${reviewId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
+  });
+};
+
 export const openTmdbMovieApi = async (id: string, signal: AbortSignal): Promise<number> => {
   const response = await httpClient.get<MovieDetailResponse>(`/movies/tmdb/${id}`, { signal });
   return response.data.id;

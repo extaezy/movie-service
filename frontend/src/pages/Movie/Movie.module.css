@@ -168,6 +168,11 @@
   flex-direction: column;
   gap: 12px;
 }
+.reviewError {
+  color: #f87171;
+  font-size: 14px;
+  margin: 0;
+}
 .textarea {
   background-color: #0f0f14;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -202,8 +207,12 @@
   font-weight: 500;
   cursor: pointer;
 }
-.saveBtn:hover {
+.saveBtn:hover:not(:disabled) {
   background-color: #8b5cf6;
+}
+.saveBtn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 .cancelBtn {
   background: transparent;
@@ -251,8 +260,12 @@
 .actionBtn.danger {
   color: #ef4444;
 }
-.actionBtn:hover {
+.actionBtn:hover:not(:disabled) {
   text-decoration: underline;
+}
+.actionBtn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .reviewsList {
@@ -299,6 +312,10 @@
   color: #d1d5db;
   margin: 0;
   line-height: 1.4;
+}
+.reviewCard .reviewBody {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .readMoreLink {
   font-size: 13px;

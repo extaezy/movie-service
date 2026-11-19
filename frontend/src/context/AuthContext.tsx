@@ -11,6 +11,7 @@ const ACCESS_TOKEN_KEY = 'movie_service_access_token';
 
 interface AuthContextType {
   user: User | null;
+  accessToken: string | null;
   loading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
@@ -60,9 +61,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {};
+  const accessToken = user ? sessionStorage.getItem(ACCESS_TOKEN_KEY) : null;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser: fetchUser }}>
+    <AuthContext.Provider value={{ user, accessToken, loading, login, logout, refreshUser: fetchUser }}>
       {loading ? <Spinner /> : error ? <ErrorState message={error} onRetry={fetchUser} /> : children}
     </AuthContext.Provider>
   );

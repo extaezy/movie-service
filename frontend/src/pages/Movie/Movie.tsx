@@ -1,26 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { isAxiosError } from 'axios';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '../../components/Spinner/Spinner';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { getApiErrorMessage } from '../../api/errors';
 import {
+  createMovieReviewApi,
   getDemoMovieDetailApi,
   getMovieDetailApi,
   openTmdbMovieApi,
+  removeMovieReviewApi,
   rateMovieApi,
   setMovieStatusApi,
   saveReviewApi,
   deleteReviewApi,
+  updateMovieReviewApi,
 } from '../../api/movieDetail';
-import type { MovieDetail } from '../../api/movieDetail';
+import type { MovieDetail, Review } from '../../api/movieDetail';
+import { UserReviewList } from './UserReviewList';
 import styles from './Movie.module.css';
 
 interface MoviePageProps {
   source?: 'catalog' | 'tmdb' | 'demo';
 }
 
+type SavedReview = NonNullable<MovieDetail['user_review']>;
+type ReviewAction = 'save' | 'delete';
 const releaseDateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' });
 const ratingFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
 
@@ -33,13 +40,20 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
-
   // Рецензия локальное состояние формы
   const [reviewText, setReviewText] = useState<string>('');
   const [isSpoiler, setIsSpoiler] = useState<boolean>(false);
   const [isEditingReview, setIsEditingReview] = useState<boolean>(false);
+  const [pendingReviewAction, setPendingReviewAction] = useState<ReviewAction | null>(null);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewRevision, setReviewRevision] = useState(0);
+  const reviewSubmission = useRef<AbortController | null>(null);
 
+  const { user, accessToken } = useAuth();
   const { showToast } = useToast();
+
+  const editingReview = isEditingReview ? movie?.user_review : null;
+  const unchangedReview = editingReview?.text === reviewText && editingReview?.is_spoiler === isSpoiler;
 
   const fetchMovie = () => setAttempt((previous) => previous + 1);
 
@@ -48,6 +62,9 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
     setNotFound(false);
     setError('');
     setMovie(null);
+    setReviewError('');
+    setIsEditingReview(false);
+    setPendingReviewAction(null);
 
     if (!id || (!isDemo && (!/^\d+$/.test(id) || Number(id) < 1 || Number(id) > 2147483647))) {
       setNotFound(true);
@@ -83,7 +100,11 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
         setLoading(false);
       }).catch(handleError);
     }
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      reviewSubmission.current?.abort();
+      reviewSubmission.current = null;
+    };
   }, [id, source, isDemo, navigate, attempt]);
 
   // Обработка рейтинга
@@ -111,10 +132,80 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
     }
   };
 
+  const restoreOwnReview = useCallback((movieId: string, review: Review) => {
+    setMovie((previous) => {
+      if (previous?.id !== movieId || previous.user_review) return previous;
+      return {
+        ...previous,
+        user_review: { id: review.id, text: review.text, is_spoiler: review.is_spoiler },
+      };
+    });
+  }, []);
+
+  const handleEditReview = () => {
+    const review = movie?.user_review;
+    if (!review) return;
+    setReviewText(review.text);
+    setIsSpoiler(review.is_spoiler);
+    setReviewError('');
+    setIsEditingReview(true);
+  };
+
+  const mutateReview = async (
+    movieId: string,
+    action: ReviewAction,
+    mutate: (token: string, signal: AbortSignal) => Promise<SavedReview | null>,
+  ) => {
+    if (!accessToken || reviewSubmission.current) return;
+    const submission = new AbortController();
+    reviewSubmission.current = submission;
+    setPendingReviewAction(action);
+    setReviewError('');
+
+    try {
+      const saved = await mutate(accessToken, submission.signal);
+      if (submission.signal.aborted) return;
+
+      setMovie((previous) => previous?.id === movieId ? { ...previous, user_review: saved } : previous);
+      setReviewText(saved?.text ?? '');
+      setIsSpoiler(saved?.is_spoiler ?? false);
+      setIsEditingReview(false);
+      setReviewRevision((revision) => revision + 1);
+      showToast(action === 'save' ? 'Рецензия сохранена' : 'Рецензия удалена');
+    } catch (requestError) {
+      if (!submission.signal.aborted) {
+        const fallback = action === 'save' ? 'Не удалось сохранить рецензию.' : 'Не удалось удалить рецензию.';
+        setReviewError(getApiErrorMessage(requestError, fallback));
+      }
+    } finally {
+      if (reviewSubmission.current === submission) {
+        reviewSubmission.current = null;
+        setPendingReviewAction(null);
+      }
+    }
+  };
+
   // Сохранение рецензии
   const handleSaveReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !isDemo || !reviewText.trim()) return;
+    if (!id || !movie || !reviewText.trim()) return;
+
+    if (!isDemo) {
+      if (unchangedReview) return;
+      const draft = { text: reviewText, contains_spoilers: isSpoiler };
+      const changes: Partial<typeof draft> = {};
+      if (editingReview?.text !== draft.text) changes.text = draft.text;
+      if (editingReview?.is_spoiler !== draft.contains_spoilers) changes.contains_spoilers = draft.contains_spoilers;
+
+      await mutateReview(movie.id, 'save', async (token, signal) => {
+        const saved = editingReview
+          ? await updateMovieReviewApi(editingReview.id, changes, token, signal)
+          : await createMovieReviewApi(movie.id, draft, token, signal);
+        return { id: String(saved.id), text: saved.text, is_spoiler: saved.contains_spoilers };
+      });
+      return;
+    }
+
     try {
       await saveReviewApi(id, reviewText, isSpoiler);
       setMovie((prev) =>
@@ -135,7 +226,17 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
 
   // Удаление рецензии
   const handleDeleteReview = async () => {
-    if (!id || !isDemo) return;
+    const review = movie?.user_review;
+    if (!id || !movie || !review) return;
+
+    if (!isDemo) {
+      await mutateReview(movie.id, 'delete', async (token, signal) => {
+        await removeMovieReviewApi(review.id, token, signal);
+        return null;
+      });
+      return;
+    }
+
     try {
       await deleteReviewApi(id);
       setMovie((prev) => (prev ? { ...prev, user_review: null } : null));
@@ -153,6 +254,7 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   if (!movie) return <ErrorState message={error} onRetry={fetchMovie} />;
 
   const releaseDate = movie.release_date ? releaseDateFormat.format(new Date(movie.release_date)) : movie.year;
+  const reviewFieldsDisabled = !isDemo && (!accessToken || pendingReviewAction !== null);
 
   return (
     <div className={styles.container}>
@@ -254,78 +356,88 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
           <div className={styles.card}>
             <h3 className={styles.cardTitle}>Моя рецензия</h3>
             {movie.user_review && !isEditingReview ? (
-              <div className={styles.myReviewView}>
+              <div className={styles.myReviewView} aria-busy={pendingReviewAction === 'delete'}>
                 <p className={styles.reviewText}>{movie.user_review.text}</p>
                 {movie.user_review.is_spoiler && <span className={styles.spoilerTag}>Содержит спойлеры</span>}
                 <div className={styles.reviewActions}>
-                  <button className={styles.actionBtn} onClick={() => setIsEditingReview(true)}>
+                  <button
+                    type="button"
+                    className={styles.actionBtn}
+                    disabled={reviewFieldsDisabled}
+                    onClick={handleEditReview}
+                  >
                     Редактировать
                   </button>
-                  <button className={`${styles.actionBtn} ${styles.danger}`} onClick={handleDeleteReview}>
-                    Удалить
+                  <button
+                    type="button"
+                    className={`${styles.actionBtn} ${styles.danger}`}
+                    disabled={reviewFieldsDisabled}
+                    onClick={handleDeleteReview}
+                  >
+                    {pendingReviewAction === 'delete' ? 'Удаляем…' : 'Удалить'}
                   </button>
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleSaveReview} className={styles.reviewForm}>
+              <form onSubmit={handleSaveReview} className={styles.reviewForm} aria-busy={pendingReviewAction === 'save'}>
                 <textarea
                   className={styles.textarea}
                   placeholder="Напишите вашу рецензию..."
                   value={reviewText}
                   onChange={(e) => setReviewText(e.target.value)}
                   rows={4}
-                  disabled={!isDemo}
+                  disabled={reviewFieldsDisabled}
                 />
                 <label className={styles.checkboxLabel}>
                   <input
                     type="checkbox"
                     checked={isSpoiler}
-                    disabled={!isDemo}
+                    disabled={reviewFieldsDisabled}
                     onChange={(e) => setIsSpoiler(e.target.checked)}
                   />
                   Содержит спойлеры
                 </label>
                 <div className={styles.formButtons}>
-                  <button type="submit" className={styles.saveBtn} disabled={!isDemo}>
-                    Сохранить
+                  <button
+                    type="submit"
+                    className={styles.saveBtn}
+                    disabled={reviewFieldsDisabled || (!isDemo && (!reviewText.trim() || unchangedReview))}
+                  >
+                    {pendingReviewAction === 'save' ? 'Сохраняем…' : 'Сохранить'}
                   </button>
                   {movie.user_review && (
                     <button
                       type="button"
                       className={styles.cancelBtn}
-                      onClick={() => setIsEditingReview(false)}
+                      disabled={reviewFieldsDisabled}
+                      onClick={() => {
+                        setIsEditingReview(false);
+                        setReviewError('');
+                      }}
                     >
                       Отмена
                     </button>
                   )}
                 </div>
+                {!isDemo && !accessToken && (
+                  <Link to="/login" className={styles.actionBtn}>Войти, чтобы написать рецензию</Link>
+                )}
               </form>
             )}
+            {reviewError && <p className={styles.reviewError} role="alert">{reviewError}</p>}
           </div>
         </div>
 
         {/* Правая колонка: Рецензии других и Рецензии критиков */}
         <div className={styles.rightColumn}>
           {/* Рецензии других пользователей */}
-          <div className={styles.card}>
-            <h3 className={styles.cardTitle}>Рецензии пользователей</h3>
-            {movie.reviews && movie.reviews.length > 0 ? (
-              <div className={styles.reviewsList}>
-                {movie.reviews.map((rev) => (
-                  <div key={rev.id} className={styles.reviewCard}>
-                    <div className={styles.reviewHeader}>
-                      <span className={styles.authorName}>{rev.author.display_name || rev.author.username}</span>
-                      <span className={styles.reviewDate}>{new Date(rev.created_at).toLocaleDateString()}</span>
-                    </div>
-                    {rev.is_spoiler && <span className={styles.spoilerTag}>Спойлер</span>}
-                    <p className={styles.reviewBody}>{rev.text}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className={styles.emptyText}>{isDemo ? 'Пока нет рецензий от пользователей' : 'Рецензии пользователей пока не подключены'}</p>
-            )}
-          </div>
+          <UserReviewList
+            key={`${source}:${movie.id}:${reviewRevision}`}
+            movieId={movie.id}
+            demoReviews={isDemo ? movie.reviews ?? [] : undefined}
+            currentUsername={isDemo ? undefined : user?.username}
+            onOwnReview={restoreOwnReview}
+          />
 
           {/* Рецензии критиков */}
           <div className={styles.card}>

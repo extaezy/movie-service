@@ -6,6 +6,8 @@ import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { getApiErrorMessage } from '../../api/errors';
+import { addMovieListEntryApi } from '../../api/lists';
+import type { ListType } from '../../api/lists';
 import {
   createMovieReviewApi,
   getDemoMovieDetailApi,
@@ -28,6 +30,26 @@ interface MoviePageProps {
 
 type SavedReview = NonNullable<MovieDetail['user_review']>;
 type ReviewAction = 'save' | 'delete';
+type ListSaveStatus = 'idle' | 'saving' | 'saved';
+
+const listMessages = {
+  watchlist: {
+    added: 'Фильм добавлен в список',
+    exists: 'Фильм уже в списке',
+    error: 'Не удалось добавить фильм в список.',
+  },
+  watched: {
+    added: 'Фильм отмечен как просмотренный',
+    exists: 'Фильм уже в «Просмотрено»',
+    error: 'Не удалось отметить фильм как просмотренный.',
+  },
+  favorite: {
+    added: 'Фильм добавлен в «Любимое»',
+    exists: 'Фильм уже в «Любимом»',
+    error: 'Не удалось добавить фильм в «Любимое».',
+  },
+};
+
 const releaseDateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' });
 const ratingFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
 
@@ -40,6 +62,9 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [listStatuses, setListStatuses] = useState<Partial<Record<ListType, ListSaveStatus>>>({});
+  const listSubmissions = useRef<Partial<Record<ListType, AbortController>>>({});
+
   // Рецензия локальное состояние формы
   const [reviewText, setReviewText] = useState<string>('');
   const [isSpoiler, setIsSpoiler] = useState<boolean>(false);
@@ -62,6 +87,7 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
     setNotFound(false);
     setError('');
     setMovie(null);
+    setListStatuses({});
     setReviewError('');
     setIsEditingReview(false);
     setPendingReviewAction(null);
@@ -102,6 +128,8 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
     }
     return () => {
       controller.abort();
+      Object.values(listSubmissions.current).forEach((submission) => submission.abort());
+      listSubmissions.current = {};
       reviewSubmission.current?.abort();
       reviewSubmission.current = null;
     };
@@ -129,6 +157,28 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
       showToast('Статус обновлен');
     } catch {
       showToast('Не удалось обновить статус');
+    }
+  };
+
+  const handleAddToList = async (listType: ListType) => {
+    if (!movie || !accessToken || listSubmissions.current[listType]) return;
+    const submission = new AbortController();
+    const messages = listMessages[listType];
+    listSubmissions.current[listType] = submission;
+    setListStatuses((previous) => ({ ...previous, [listType]: 'saving' }));
+
+    try {
+      const created = await addMovieListEntryApi(movie.id, listType, accessToken, submission.signal);
+      if (submission.signal.aborted) return;
+      setListStatuses((previous) => ({ ...previous, [listType]: 'saved' }));
+      showToast(created ? messages.added : messages.exists);
+    } catch (requestError) {
+      if (!submission.signal.aborted) {
+        setListStatuses((previous) => ({ ...previous, [listType]: 'idle' }));
+        showToast(getApiErrorMessage(requestError, messages.error));
+      }
+    } finally {
+      if (listSubmissions.current[listType] === submission) delete listSubmissions.current[listType];
     }
   };
 
@@ -254,7 +304,16 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   if (!movie) return <ErrorState message={error} onRetry={fetchMovie} />;
 
   const releaseDate = movie.release_date ? releaseDateFormat.format(new Date(movie.release_date)) : movie.year;
+  const genres = movie.catalog_genres ?? (movie.genres ?? []).map((name) => ({ id: undefined, name }));
   const reviewFieldsDisabled = !isDemo && (!accessToken || pendingReviewAction !== null);
+  const {
+    watchlist: watchlistStatus = 'idle',
+    watched: watchedStatus = 'idle',
+    favorite: favoriteStatus = 'idle',
+  } = listStatuses;
+  const watchlistActive = isDemo ? movie.user_status === 'watchlist' : watchlistStatus === 'saved';
+  const watchedActive = isDemo ? movie.user_status === 'watched' : watchedStatus === 'saved';
+  const favoriteActive = isDemo ? movie.user_status === 'favorite' : favoriteStatus === 'saved';
 
   return (
     <div className={styles.container}>
@@ -278,10 +337,19 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
             {movie.duration && <span className={styles.duration}>{movie.duration} мин.</span>}
           </div>
           <div className={styles.genres}>
-            {movie.genres?.map((genre) => (
-              <span key={genre} className={styles.genreTag}>
-                {genre}
-              </span>
+            {genres.map(({ id: genreId, name }) => (
+              user && genreId !== undefined ? (
+                <Link
+                  key={genreId}
+                  className={styles.genreTag}
+                  to={`/lists/watched?${new URLSearchParams({ genre_id: String(genreId), genre_name: name })}`}
+                  title={`Просмотренные фильмы жанра «${name}»`}
+                >
+                  {name}
+                </Link>
+              ) : (
+                <span key={genreId ?? name} className={styles.genreTag}>{name}</span>
+              )
             ))}
           </div>
           <p className={styles.description}>{movie.description || 'Описание отсутствует.'}</p>
@@ -303,25 +371,28 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
           {/* Блок добавления в список */}
           <div className={styles.statusTabs}>
             <button
-              className={`${styles.statusBtn} ${movie.user_status === 'watchlist' ? styles.activeStatus : ''}`}
-              disabled={!isDemo}
-              onClick={() => handleStatusChange('watchlist')}
+              type="button"
+              className={`${styles.statusBtn} ${watchlistActive ? styles.activeStatus : ''}`}
+              disabled={!isDemo && (!accessToken || watchlistStatus !== 'idle')}
+              onClick={isDemo ? () => handleStatusChange('watchlist') : () => handleAddToList('watchlist')}
             >
-              Планирую посмотреть
+              {watchlistStatus === 'saving' ? 'Добавляем…' : 'Планирую посмотреть'}
             </button>
             <button
-              className={`${styles.statusBtn} ${movie.user_status === 'watched' ? styles.activeStatus : ''}`}
-              disabled={!isDemo}
-              onClick={() => handleStatusChange('watched')}
+              type="button"
+              className={`${styles.statusBtn} ${watchedActive ? styles.activeStatus : ''}`}
+              disabled={!isDemo && (!accessToken || watchedStatus !== 'idle')}
+              onClick={isDemo ? () => handleStatusChange('watched') : () => handleAddToList('watched')}
             >
-              Просмотрено
+              {watchedStatus === 'saving' ? 'Отмечаем…' : 'Просмотрено'}
             </button>
             <button
-              className={`${styles.statusBtn} ${movie.user_status === 'favorite' ? styles.activeStatus : ''}`}
-              disabled={!isDemo}
-              onClick={() => handleStatusChange('favorite')}
+              type="button"
+              className={`${styles.statusBtn} ${favoriteActive ? styles.activeStatus : ''}`}
+              disabled={!isDemo && (!accessToken || favoriteStatus !== 'idle')}
+              onClick={isDemo ? () => handleStatusChange('favorite') : () => handleAddToList('favorite')}
             >
-              Любимое
+              {favoriteStatus === 'saving' ? 'Сохраняем…' : 'Любимое'}
             </button>
           </div>
         </div>

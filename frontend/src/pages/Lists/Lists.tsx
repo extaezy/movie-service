@@ -20,9 +20,26 @@ const TAB_LABELS: Record<ListType, string> = {
   favorite: 'Любимое',
 };
 
+export const ListTabs = ({ currentType }: { currentType: ListType }) => {
+  const navigate = useNavigate();
+  return (
+    <div className={styles.tabsBar}>
+      {VALID_TYPES.map((tabType) => (
+        <button
+          type="button"
+          key={tabType}
+          className={`${styles.tabBtn} ${currentType === tabType ? styles.activeTab : ''}`}
+          onClick={() => navigate(`/lists/${tabType}`)}
+        >
+          {TAB_LABELS[tabType]}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 export const Lists: React.FC = () => {
   const { type } = useParams<{ type: string }>();
-  const navigate = useNavigate();
   const { showToast } = useToast();
 
   const [movies, setMovies] = useState<Movie[]>([]);
@@ -114,17 +131,7 @@ export const Lists: React.FC = () => {
   return (
     <div className={styles.container}>
       {/* Табы переключения списков */}
-      <div className={styles.tabsBar}>
-        {VALID_TYPES.map((tabType) => (
-          <button
-            key={tabType}
-            className={`${styles.tabBtn} ${currentType === tabType ? styles.activeTab : ''}`}
-            onClick={() => navigate(`/lists/${tabType}`)}
-          >
-            {TAB_LABELS[tabType]}
-          </button>
-        ))}
-      </div>
+      <ListTabs currentType={currentType} />
 
       {loading ? (
         <Spinner />

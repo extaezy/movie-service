@@ -28,6 +28,7 @@ export interface CriticReview {
 export interface MovieDetail extends Omit<Movie, 'year'> {
   year?: number;
   release_date?: string;
+  catalog_genres?: { id: number; name: string }[];
   average_rating?: number | null;
   ratings_count?: number;
   tmdb_vote_average?: number | null;
@@ -140,6 +141,7 @@ export const getMovieDetailApi = async (id: string, signal: AbortSignal): Promis
     release_date: data.release_date ?? undefined,
     poster_url: getTmdbPosterUrl(data.poster_path),
     genres: data.genres.map(({ name }) => name),
+    catalog_genres: data.genres,
     duration: data.runtime ?? undefined,
     description: data.overview ?? undefined,
     average_rating: data.average_rating,

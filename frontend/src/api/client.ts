@@ -39,8 +39,11 @@ const getInitialDB = (): MockDB => {
       title: 'Интерстеллар',
       year: 2014,
       poster_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500',
+      backdrop_url: 'https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=1400',
       genres: ['Фантастика', 'Драма', 'Приключения'],
       duration: 169,
+      kp_rating: 8.6,
+      imdb_rating: 8.7,
       description: 'Когда засуха, пыльные бури и вымирание растений приводят человечество к продовольственному кризису, коллектив исследователей и ученых отправляется сквозь червоточину в путешествие.',
     },
     {
@@ -48,8 +51,11 @@ const getInitialDB = (): MockDB => {
       title: 'Начало',
       year: 2010,
       poster_url: 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=500',
+      backdrop_url: 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1400',
       genres: ['Фантастика', 'Боевик', 'Триллеры'],
       duration: 148,
+      kp_rating: 8.8,
+      imdb_rating: 8.8,
       description: 'Кобб — талантливый вор, лучший в опасном искусстве извлечения: он крадет ценные секреты из глубин подсознания во время сна.',
     },
     {
@@ -57,8 +63,11 @@ const getInitialDB = (): MockDB => {
       title: 'Побег из Шоушенка',
       year: 1994,
       poster_url: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=500',
+      backdrop_url: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=1400',
       genres: ['Драма'],
       duration: 142,
+      kp_rating: 9.3,
+      imdb_rating: 9.3,
       description: 'Бухгалтер Энди Дюфрейн обвинен в убийстве собственной жены и ее любовника. Оказавшись в Шоушенке, он сталкивается с жестокостью.',
     },
     {
@@ -66,8 +75,11 @@ const getInitialDB = (): MockDB => {
       title: 'Темный рыцарь',
       year: 2008,
       poster_url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=500',
+      backdrop_url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1400',
       genres: ['Боевик', 'Криминал', 'Драма'],
       duration: 152,
+      kp_rating: 9.0,
+      imdb_rating: 9.0,
       description: 'Бэтмен поднимает ставки в войне с криминалом. С помощью лейтенанта Джима Гордона и прокурора Харви Дента он намерен очистить улицы.',
     },
     {
@@ -75,8 +87,11 @@ const getInitialDB = (): MockDB => {
       title: 'Паразиты',
       year: 2019,
       poster_url: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500',
+      backdrop_url: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1400',
       genres: ['Триллер', 'Комедия', 'Драма'],
       duration: 132,
+      kp_rating: 8.6,
+      imdb_rating: 8.6,
       description: 'Обычная корейская семья Ким живет в сыром полуподвале. Случайная возможность меняет их жизнь.',
     },
     {
@@ -84,8 +99,11 @@ const getInitialDB = (): MockDB => {
       title: 'Дюна: Часть вторая',
       year: 2024,
       poster_url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=500',
+      backdrop_url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1400',
       genres: ['Фантастика', 'Приключения', 'Драма'],
       duration: 166,
+      kp_rating: 8.5,
+      imdb_rating: 8.5,
       description: 'Пол Атрейдес объединяется с чани и фрименами, пытаясь отомстить заговорщикам.',
     }
   ];
@@ -229,10 +247,12 @@ apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise
 
       const currUsername = db.currentUser?.username;
       const userFavs = currUsername ? db.userLists[currUsername]?.favorite || [] : [];
+      const userWatchlist = currUsername ? db.userLists[currUsername]?.watchlist || [] : [];
 
       result = result.map((m) => ({
         ...m,
         is_favorite: userFavs.includes(m.id),
+        is_watchlist: userWatchlist.includes(m.id),
       }));
 
       if (params.search) {

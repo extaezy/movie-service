@@ -5,6 +5,7 @@ import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { useToast } from '../../context/ToastContext';
 import { getMoviesApi, getGenresApi, toggleFavoriteApi } from '../../api/movies';
+import { setMovieStatusApi } from '../../api/movieDetail'; 
 import type { Movie } from '../../types';
 import styles from './Catalog.module.css';
 
@@ -81,7 +82,21 @@ export const Catalog: React.FC = () => {
       showToast('Не удалось обновить избранное');
     }
   };
-
+  const handleAddToWatchlist = async (movieId: string) => {
+  try {
+    const target = movies.find((m) => m.id === movieId);
+    const nextWatchlist = !target?.is_watchlist;
+    await setMovieStatusApi(movieId, nextWatchlist ? 'watchlist' : null);
+    setMovies((prev) =>
+      prev.map((m) =>
+        m.id === movieId ? { ...m, is_watchlist: nextWatchlist } : m
+      )
+    );
+    showToast(nextWatchlist ? 'Добавлено в «Буду смотреть»' : 'Удалено из списка');
+  } catch {
+    showToast('Не удалось обновить список');
+  }
+};
   return (
     <div className={styles.container}>
       <div className={styles.filtersBar}>
@@ -129,7 +144,11 @@ export const Catalog: React.FC = () => {
         <>
           <div className={styles.grid}>
             {movies.map((movie) => (
-              <MovieCard key={movie.id} movie={movie} onToggleFavorite={handleToggleFavorite} />
+              <MovieCard key={movie.id} 
+               movie={movie} 
+               onToggleFavorite={handleToggleFavorite}
+               onAddToWatchlist={handleAddToWatchlist}
+               />
             ))}
           </div>
 

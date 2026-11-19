@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { Spinner } from '../../components/Spinner/Spinner';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { useToast } from '../../context/ToastContext';
@@ -15,21 +15,21 @@ import styles from './Movie.module.css';
 
 export const MoviePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const [movie, setMovie] = useState<MovieDetail | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [errorType, setErrorType] = useState<'404' | 'server' | null>(null);
-
-  // Рецензия локальное состояние формы
-  const [reviewText, setReviewText] = useState<string>('');
-  const [isSpoiler, setIsSpoiler] = useState<boolean>(false);
-  const [isEditingReview, setIsEditingReview] = useState<boolean>(false);
-
   const { showToast } = useToast();
 
-  const fetchMovie = useCallback(async () => {
+  const [movie, setMovie] = useState<MovieDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const [reviewText, setReviewText] = useState('');
+  const [isSpoiler, setIsSpoiler] = useState(false);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [revealedSpoilers, setRevealedSpoilers] = useState<Record<string, boolean>>({});
+
+  const fetchDetail = useCallback(async () => {
     if (!id) return;
     setLoading(true);
-    setErrorType(null);
+    setError(false);
     try {
       const data = await getMovieDetailApi(id);
       setMovie(data);
@@ -37,256 +37,285 @@ export const MoviePage: React.FC = () => {
         setReviewText(data.user_review.text);
         setIsSpoiler(data.user_review.is_spoiler);
       }
-    } catch (err: any) {
-      if (err.response?.status === 404) {
-        setErrorType('404');
-      } else {
-        setErrorType('server');
-      }
+    } catch {
+      setError(true);
     } finally {
       setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
-    fetchMovie();
-  }, [fetchMovie]);
+    fetchDetail();
+  }, [fetchDetail]);
 
-  // Обработка рейтинга
   const handleRate = async (rating: number | null) => {
-    if (!id) return;
+    if (!movie) return;
     try {
-      await rateMovieApi(id, rating);
-      setMovie((prev) => (prev ? { ...prev, user_rating: rating } : null));
-      showToast(rating ? `Оценка ${rating} сохранена` : 'Оценка удалена');
+      await rateMovieApi(movie.id, rating);
+      setMovie({ ...movie, user_rating: rating });
+      showToast(rating ? `Ваша оценка: ${rating}/10` : 'Оценка удалена');
     } catch {
       showToast('Не удалось сохранить оценку');
     }
   };
 
-  // Обработка статуса (watchlist, watched, favorite)
-  const handleStatusChange = async (status: 'watchlist' | 'watched' | 'favorite') => {
-    if (!id || !movie) return;
-    const newStatus = movie.user_status === status ? null : status;
+  const handleStatusChange = async (
+    status: 'watchlist' | 'watched' | 'favorite' | null
+  ) => {
+    if (!movie) return;
+    const nextStatus = movie.user_status === status ? null : status;
     try {
-      await setMovieStatusApi(id, newStatus);
-      setMovie((prev) => (prev ? { ...prev, user_status: newStatus } : null));
-      showToast('Статус обновлен');
+      await setMovieStatusApi(movie.id, nextStatus);
+      setMovie({ ...movie, user_status: nextStatus });
+      showToast(nextStatus ? 'Статус обновлён' : 'Удалено из списков');
     } catch {
       showToast('Не удалось обновить статус');
     }
   };
 
-  // Сохранение рецензии
-  const handleSaveReview = async (e: React.FormEvent) => {
+  const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !reviewText.trim()) return;
+    if (!movie || !reviewText.trim()) return;
+    setSubmittingReview(true);
     try {
-      await saveReviewApi(id, reviewText, isSpoiler);
-      setMovie((prev) =>
-        prev
-          ? {
-              ...prev,
-              user_review: { id: 'temp', text: reviewText, is_spoiler: isSpoiler },
-            }
-          : null
-      );
-      setIsEditingReview(false);
+      await saveReviewApi(movie.id, reviewText.trim(), isSpoiler);
       showToast('Рецензия сохранена');
-      fetchMovie();
+      fetchDetail();
     } catch {
-      showToast('Не удалось сохранить рецензию');
+      showToast('Ошибка при сохранении рецензии');
+    } finally {
+      setSubmittingReview(false);
     }
   };
 
-  // Удаление рецензии
-  const handleDeleteReview = async () => {
-    if (!id) return;
+  const handleReviewDelete = async () => {
+    if (!movie) return;
     try {
-      await deleteReviewApi(id);
-      setMovie((prev) => (prev ? { ...prev, user_review: null } : null));
+      await deleteReviewApi(movie.id);
       setReviewText('');
       setIsSpoiler(false);
-      setIsEditingReview(false);
       showToast('Рецензия удалена');
+      fetchDetail();
     } catch {
       showToast('Не удалось удалить рецензию');
     }
   };
 
   if (loading) return <Spinner />;
-  if (errorType === '404') return <ErrorState message="Фильм не найден" />;
-  if (errorType === 'server' || !movie) return <ErrorState onRetry={fetchMovie} />;
+  if (error || !movie) return <ErrorState onRetry={fetchDetail} />;
+
+  const kpScore = (movie.kp_rating || 8.6).toFixed(1);
+  const imdbScore = (movie.imdb_rating || 8.4).toFixed(1);
+  const myScore = movie.user_rating ? movie.user_rating.toFixed(1) : '—';
 
   return (
-    <div className={styles.container}>
-      {/* Основная информация */}
-      <div className={styles.heroSection}>
-        <div className={styles.posterWrapper}>
-          <img src={movie.poster_url || '/placeholder.png'} alt={movie.title} className={styles.poster} />
-        </div>
-        <div className={styles.meta}>
-          <h1 className={styles.title}>{movie.title}</h1>
-          <div className={styles.detailsRow}>
-            <span className={styles.year}>{movie.year}</span>
-            {movie.duration && <span className={styles.duration}>{movie.duration} мин.</span>}
-          </div>
-          <div className={styles.genres}>
-            {movie.genres?.map((genre) => (
-              <span key={genre} className={styles.genreTag}>
-                {genre}
-              </span>
-            ))}
-          </div>
-          <p className={styles.description}>{movie.description || 'Описание отсутствует.'}</p>
+    <div className={styles.page}>
+      {/* Полноширинный Hero-баннер */}
+      <section className={styles.hero}>
+        <div
+          className={styles.heroBackdrop}
+          style={{
+            backgroundImage: `url(${movie.backdrop_url || movie.poster_url})`,
+          }}
+        />
+        <div className={styles.heroGradient} />
 
-          {/* Блок добавления в список */}
-          <div className={styles.statusTabs}>
-            <button
-              className={`${styles.statusBtn} ${movie.user_status === 'watchlist' ? styles.activeStatus : ''}`}
-              onClick={() => handleStatusChange('watchlist')}
-            >
-              Планирую посмотреть
-            </button>
-            <button
-              className={`${styles.statusBtn} ${movie.user_status === 'watched' ? styles.activeStatus : ''}`}
-              onClick={() => handleStatusChange('watched')}
-            >
-              Просмотрено
-            </button>
-            <button
-              className={`${styles.statusBtn} ${movie.user_status === 'favorite' ? styles.activeStatus : ''}`}
-              onClick={() => handleStatusChange('favorite')}
-            >
-              Любимое
-            </button>
-          </div>
-        </div>
-      </div>
+        <div className={styles.heroInner}>
+          <Link to="/" className={styles.backLink}>
+            ‹ Каталог
+          </Link>
 
-      <div className={styles.contentGrid}>
-        {/* Левая колонка: Оценка и Своя рецензия */}
-        <div className={styles.leftColumn}>
-          {/* Блок "Моя оценка" */}
-          <div className={styles.card}>
-            <h3 className={styles.cardTitle}>Моя оценка</h3>
-            <div className={styles.ratingSelector}>
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                <button
-                  key={num}
-                  className={`${styles.rateBtn} ${movie.user_rating === num ? styles.activeRate : ''}`}
-                  onClick={() => handleRate(num)}
-                >
-                  {num}
-                </button>
-              ))}
+          <div className={styles.heroMain}>
+            <div className={styles.posterCard}>
+              <img
+                src={movie.poster_url}
+                alt={movie.title}
+                className={styles.poster}
+              />
             </div>
+
+            <div className={styles.heroInfo}>
+              <span className={styles.categoryTag}>ФИЛЬМ</span>
+              <h1 className={styles.title}>{movie.title}</h1>
+
+              <div className={styles.metaLine}>
+                <span>{movie.year}</span>
+                <span>{movie.genres.join(', ')}</span>
+                {movie.duration && <span>{movie.duration} мин</span>}
+              </div>
+
+              {/* Блок рейтингов как на референсе */}
+              <div className={styles.ratingsGrid}>
+                <div className={styles.ratingBlock}>
+                  <span className={`${styles.ratingValue} ${styles.kpColor}`}>
+                    {kpScore}
+                  </span>
+                  <span className={styles.ratingLabel}>КИНОПОИСК</span>
+                </div>
+
+                <div className={styles.ratingBlock}>
+                  <span className={styles.ratingValue}>{imdbScore}</span>
+                  <span className={styles.ratingLabel}>IMDB</span>
+                </div>
+
+                <div className={styles.ratingBlock}>
+                  <span className={styles.ratingValue}>{myScore}</span>
+                  <span className={styles.ratingLabel}>МОЯ ОЦЕНКА</span>
+                </div>
+              </div>
+
+              {movie.description && (
+                <p className={styles.description}>{movie.description}</p>
+              )}
+
+              {/* Pill-кнопки действий */}
+              <div className={styles.heroButtons}>
+                <button
+                  type="button"
+                  className={styles.whitePillBtn}
+                  onClick={() => handleStatusChange('watched')}
+                >
+                  <span>▶</span>
+                  {movie.user_status === 'watched' ? 'Просмотрено' : 'Смотреть'}
+                </button>
+
+                <button
+                  type="button"
+                  className={`${styles.glassPillBtn} ${
+                    movie.user_status === 'favorite' ? styles.glassPillActive : ''
+                  }`}
+                  onClick={() => handleStatusChange('favorite')}
+                >
+                  <span className={styles.heartIcon}>♥</span>
+                  {movie.user_status === 'favorite' ? 'В избранном' : 'В избранное'}
+                </button>
+
+                <button
+                  type="button"
+                  className={`${styles.glassPillBtn} ${
+                    movie.user_status === 'watchlist' ? styles.glassPillActive : ''
+                  }`}
+                  onClick={() => handleStatusChange('watchlist')}
+                >
+                  {movie.user_status === 'watchlist' ? '✓ Буду смотреть' : '+ Буду смотреть'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Нижняя рабочая зона: оценка 1-10 и рецензии */}
+      <div className={styles.contentContainer}>
+        <div className={styles.rateStrip}>
+          <span className={styles.rateStripTitle}>Поставить свою оценку:</span>
+          <div className={styles.scoreButtons}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+              <button
+                key={num}
+                type="button"
+                className={`${styles.scoreBtn} ${
+                  movie.user_rating === num ? styles.scoreBtnActive : ''
+                }`}
+                onClick={() => handleRate(num)}
+              >
+                {num}
+              </button>
+            ))}
             {movie.user_rating && (
-              <button className={styles.deleteRateBtn} onClick={() => handleRate(null)}>
-                Удалить оценку
+              <button
+                type="button"
+                className={styles.clearScoreBtn}
+                onClick={() => handleRate(null)}
+              >
+                Сбросить
               </button>
             )}
           </div>
+        </div>
 
-          {/* Блок "Моя рецензия" */}
-          <div className={styles.card}>
-            <h3 className={styles.cardTitle}>Моя рецензия</h3>
-            {movie.user_review && !isEditingReview ? (
-              <div className={styles.myReviewView}>
-                <p className={styles.reviewText}>{movie.user_review.text}</p>
-                {movie.user_review.is_spoiler && <span className={styles.spoilerTag}>Содержит спойлеры</span>}
-                <div className={styles.reviewActions}>
-                  <button className={styles.actionBtn} onClick={() => setIsEditingReview(true)}>
-                    Редактировать
-                  </button>
-                  <button className={`${styles.actionBtn} ${styles.danger}`} onClick={handleDeleteReview}>
+        {/* Секция рецензий */}
+        <section className={styles.reviewsSection}>
+          <h2 className={styles.sectionHeading}>Рецензии зрителей</h2>
+
+          <form onSubmit={handleReviewSubmit} className={styles.reviewForm}>
+            <textarea
+              className={styles.textarea}
+              placeholder="Поделитесь впечатлениями о фильме..."
+              value={reviewText}
+              onChange={(e) => setReviewText(e.target.value)}
+              rows={3}
+            />
+            <div className={styles.formFooter}>
+              <label className={styles.spoilerLabel}>
+                <input
+                  type="checkbox"
+                  checked={isSpoiler}
+                  onChange={(e) => setIsSpoiler(e.target.checked)}
+                />
+                Содержит спойлеры
+              </label>
+
+              <div className={styles.formBtns}>
+                {movie.user_review && (
+                  <button
+                    type="button"
+                    className={styles.deleteBtn}
+                    onClick={handleReviewDelete}
+                  >
                     Удалить
                   </button>
-                </div>
+                )}
+                <button
+                  type="submit"
+                  className={styles.submitBtn}
+                  disabled={submittingReview || !reviewText.trim()}
+                >
+                  {movie.user_review ? 'Обновить рецензию' : 'Опубликовать'}
+                </button>
               </div>
-            ) : (
-              <form onSubmit={handleSaveReview} className={styles.reviewForm}>
-                <textarea
-                  className={styles.textarea}
-                  placeholder="Напишите вашу рецензию..."
-                  value={reviewText}
-                  onChange={(e) => setReviewText(e.target.value)}
-                  rows={4}
-                />
-                <label className={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={isSpoiler}
-                    onChange={(e) => setIsSpoiler(e.target.checked)}
-                  />
-                  Содержит спойлеры
-                </label>
-                <div className={styles.formButtons}>
-                  <button type="submit" className={styles.saveBtn}>
-                    Сохранить
-                  </button>
-                  {movie.user_review && (
-                    <button
-                      type="button"
-                      className={styles.cancelBtn}
-                      onClick={() => setIsEditingReview(false)}
-                    >
-                      Отмена
-                    </button>
-                  )}
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
+            </div>
+          </form>
 
-        {/* Правая колонка: Рецензии других и Рецензии критиков */}
-        <div className={styles.rightColumn}>
-          {/* Рецензии других пользователей */}
-          <div className={styles.card}>
-            <h3 className={styles.cardTitle}>Рецензии пользователей</h3>
-            {movie.reviews && movie.reviews.length > 0 ? (
-              <div className={styles.reviewsList}>
-                {movie.reviews.map((rev) => (
+          <div className={styles.reviewsList}>
+            {movie.reviews.length === 0 ? (
+              <p className={styles.noReviews}>Пока нет рецензий. Станьте первым!</p>
+            ) : (
+              movie.reviews.map((rev) => {
+                const isHidden = rev.is_spoiler && !revealedSpoilers[rev.id];
+                return (
                   <div key={rev.id} className={styles.reviewCard}>
                     <div className={styles.reviewHeader}>
-                      <span className={styles.authorName}>{rev.author.display_name || rev.author.username}</span>
-                      <span className={styles.reviewDate}>{new Date(rev.created_at).toLocaleDateString()}</span>
+                      <Link
+                        to={`/profile/${rev.author.username}`}
+                        className={styles.authorName}
+                      >
+                        {rev.author.display_name || rev.author.username}
+                      </Link>
+                      <span className={styles.reviewDate}>
+                        {new Date(rev.created_at).toLocaleDateString()}
+                      </span>
                     </div>
-                    {rev.is_spoiler && <span className={styles.spoilerTag}>Спойлер</span>}
-                    <p className={styles.reviewBody}>{rev.text}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className={styles.emptyText}>Пока нет рецензий от пользователей</p>
-            )}
-          </div>
 
-          {/* Рецензии критиков */}
-          <div className={styles.card}>
-            <h3 className={styles.cardTitle}>Рецензии критиков</h3>
-            {movie.critic_reviews && movie.critic_reviews.length > 0 ? (
-              <div className={styles.reviewsList}>
-                {movie.critic_reviews.map((crit) => (
-                  <div key={crit.id} className={styles.criticCard}>
-                    <div className={styles.criticHeader}>
-                      <span className={styles.sourceName}>{crit.source}</span>
-                      <span className={styles.criticName}>{crit.critic}</span>
-                      {crit.rating && <span className={styles.criticRating}>{crit.rating}</span>}
-                    </div>
-                    <p className={styles.reviewBody}>"{crit.excerpt}"</p>
-                    <a href={crit.url} target="_blank" rel="noopener noreferrer" className={styles.readMoreLink}>
-                      Читать полностью →
-                    </a>
+                    {isHidden ? (
+                      <button
+                        type="button"
+                        className={styles.revealSpoilerBtn}
+                        onClick={() =>
+                          setRevealedSpoilers({ ...revealedSpoilers, [rev.id]: true })
+                        }
+                      >
+                        ⚠ Рецензия содержит спойлер. Нажмите, чтобы показать
+                      </button>
+                    ) : (
+                      <p className={styles.reviewText}>{rev.text}</p>
+                    )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className={styles.emptyText}>Пока нет рецензий критиков</p>
+                );
+              })
             )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

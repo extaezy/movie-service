@@ -13,11 +13,16 @@ export interface Movie {
   title: string;
   year: number;
   poster_url: string;
+  backdrop_url?: string;
   genres: string[];
   duration?: number;
   description?: string;
   is_favorite?: boolean;
+  is_watchlist?: boolean;
   rating?: number;
+  kp_rating?: number;
+  imdb_rating?: number;
+  trailer_url?: string;
 }
 
 export interface Review {

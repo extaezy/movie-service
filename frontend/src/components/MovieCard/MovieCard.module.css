@@ -1,68 +1,222 @@
 .card {
-  display: flex;
-  flex-direction: column;
-  background-color: #1a1a24;
+  background-color: #1a1a1f;
   border-radius: 12px;
   overflow: hidden;
-  text-decoration: none;
-  color: inherit;
-  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
+
 .card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
 }
+
 .posterWrapper {
   position: relative;
   aspect-ratio: 2 / 3;
-  width: 100%;
-  background-color: #272733;
+  background-color: #121216;
+  overflow: hidden;
 }
+
+.posterLink {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .poster {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: opacity 0.2s ease;
 }
-.favoriteBtn {
+
+.card:hover .poster {
+  opacity: 0.92;
+}
+
+/* Закладка-флажок в левом верхнем углу */
+.ribbonBookmark {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(15, 15, 20, 0.6);
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 46px;
+  background: none;
   border: none;
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
+  padding: 0;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #9ca3af;
-  font-size: 16px;
-  cursor: pointer;
-  transition: color 0.2s, background 0.2s;
 }
-.favoriteBtn.active {
-  color: #fbbf24;
-  background: rgba(15, 15, 20, 0.8);
+
+.ribbonSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: rgba(18, 18, 22, 0.78);
+  transition: fill 0.2s ease;
 }
-.favoriteBtn:hover {
-  color: #fbbf24;
+
+.ribbonBookmark:hover .ribbonSvg {
+  fill: rgba(45, 45, 55, 0.92);
 }
-.info {
+
+.ribbonActive .ribbonSvg {
+  fill: #f5c518;
+}
+
+.ribbonIcon {
+  position: relative;
+  z-index: 1;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  line-height: 1;
+}
+
+.ribbonActive .ribbonIcon {
+  color: #0f0f14;
+  font-weight: 700;
+}
+
+.body {
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  flex: 1;
 }
-.title {
+
+.ratingRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
   font-size: 14px;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.year {
-  font-size: 12px;
-  color: #9ca3af;
+
+.imdbRating {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+
+.goldStar {
+  color: #f5c518;
+  font-size: 15px;
+}
+
+.rateStarBtn {
+  background: none;
+  border: none;
+  color: #5799ef;
+  font-size: 17px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.rateStarBtn:hover {
+  background-color: rgba(87, 153, 239, 0.15);
+}
+
+.rateStarActive {
+  color: #f5c518;
+}
+
+.title {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  min-height: 40px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.title:hover {
+  text-decoration: underline;
+}
+
+.primaryPillBtn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: none;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #5799ef;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  margin-top: auto;
+}
+
+.primaryPillBtn:hover {
+  background-color: rgba(87, 153, 239, 0.18);
+}
+
+.primaryPillBtnAdded {
+  color: #e5e7eb;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 4px;
+}
+
+.trailerBtn {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trailerBtn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.infoBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: Georgia, serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.infoBtn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
 }

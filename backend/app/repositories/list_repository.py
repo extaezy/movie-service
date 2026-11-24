@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from sqlalchemy import delete, func, or_, select, true
+from sqlalchemy import delete, func, select, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Friendship, Movie, MovieGenre, Profile, User, UserMovieEntry
+from app.db.models import Movie, MovieGenre, Profile, User, UserMovieEntry
+from app.repositories.profile_repository import profile_access_condition
 from app.schemas.lists import ListedMovieResponse, ListType, MovieListPage
 
 MOVIE_LIST_PAGE_SIZE = 20
@@ -50,20 +51,6 @@ async def get_visible_movie_list(
     q: str | None = None,
     genre_id: int | None = None,
 ) -> MovieListPage | None:
-    access = Profile.is_private.is_(False)
-    if viewer_id is not None:
-        accepted_friendship = (
-            select(Friendship.id)
-            .where(
-                Friendship.user_low_id == func.least(User.id, viewer_id),
-                Friendship.user_high_id == func.greatest(User.id, viewer_id),
-                Friendship.status == "accepted",
-            )
-            .correlate(User)
-            .exists()
-        )
-        access = or_(access, User.id == viewer_id, accepted_friendship)
-
     list_filters = [
         UserMovieEntry.user_id == User.id,
         UserMovieEntry.list_type == list_type,
@@ -103,7 +90,7 @@ async def get_visible_movie_list(
         .select_from(User)
         .outerjoin(Profile, Profile.user_id == User.id)
         .outerjoin(page_movies, true())
-        .where(User.username == username, access)
+        .where(User.username == username, profile_access_condition(viewer_id))
         .order_by(page_movies.c.added_at.desc(), page_movies.c.id.desc())
     )
     rows = (await session.execute(statement)).mappings().all()

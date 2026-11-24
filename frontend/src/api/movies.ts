@@ -24,10 +24,26 @@ interface TmdbMoviePage {
   results: TmdbMovie[];
 }
 
-export type TmdbSort =
-  | 'popularity_desc'
-  | 'release_date_asc'
-  | 'release_date_desc';
+type ReleaseDateSort = 'release_date_asc' | 'release_date_desc';
+
+export type TmdbSort = 'popularity_desc' | ReleaseDateSort;
+
+interface LocalMovie extends Omit<TmdbMovie, 'genre_ids'> {
+  id: number;
+  runtime: number | null;
+  genres: (TmdbGenre & { id: number })[];
+}
+
+interface LocalMoviePage extends Omit<TmdbMoviePage, 'results'> {
+  page_size: number;
+  results: LocalMovie[];
+}
+
+interface LocalCatalogParams {
+  page: number;
+  year?: number;
+  sort: ReleaseDateSort;
+}
 
 interface DiscoverParams {
   page: number;
@@ -35,6 +51,14 @@ interface DiscoverParams {
   year?: number;
   sort: TmdbSort;
 }
+
+export const getLocalMoviesApi = async (
+  params: LocalCatalogParams,
+  signal: AbortSignal,
+): Promise<LocalMoviePage> => {
+  const { data } = await httpClient.get<LocalMoviePage>('/movies', { params, signal });
+  return data;
+};
 
 export const getDiscoverMoviesApi = async (
   params: DiscoverParams,

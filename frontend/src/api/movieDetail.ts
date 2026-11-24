@@ -158,6 +158,22 @@ export const getDemoMovieDetailApi = async (id: string, signal: AbortSignal): Pr
   return response.data;
 };
 
+export const updateMovieRatingApi = async (
+  movieId: string,
+  score: number | null,
+  token: string,
+  signal: AbortSignal,
+): Promise<number | null> => {
+  const config = { headers: { Authorization: `Bearer ${token}` }, signal };
+  const url = `/movies/${movieId}/rating`;
+  if (score === null) {
+    await httpClient.delete(url, config);
+    return null;
+  }
+  const { data } = await httpClient.put<{ movie_id: number; score: number }>(url, { score }, config);
+  return data.score;
+};
+
 export const rateMovieApi = async (id: string, rating: number | null): Promise<void> => {
   await apiClient.post(`/movies/${id}/rating`, { rating });
 };

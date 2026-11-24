@@ -6,8 +6,6 @@ import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { getApiErrorMessage } from '../../api/errors';
-import { addMovieListEntryApi } from '../../api/lists';
-import type { ListType } from '../../api/lists';
 import {
   createMovieReviewApi,
   getDemoMovieDetailApi,
@@ -18,9 +16,11 @@ import {
   setMovieStatusApi,
   saveReviewApi,
   deleteReviewApi,
+  updateMovieRatingApi,
   updateMovieReviewApi,
 } from '../../api/movieDetail';
 import type { MovieDetail, Review } from '../../api/movieDetail';
+import { MovieListButtons } from './MovieListButtons';
 import { UserReviewList } from './UserReviewList';
 import styles from './Movie.module.css';
 
@@ -30,25 +30,6 @@ interface MoviePageProps {
 
 type SavedReview = NonNullable<MovieDetail['user_review']>;
 type ReviewAction = 'save' | 'delete';
-type ListSaveStatus = 'idle' | 'saving' | 'saved';
-
-const listMessages = {
-  watchlist: {
-    added: 'Фильм добавлен в список',
-    exists: 'Фильм уже в списке',
-    error: 'Не удалось добавить фильм в список.',
-  },
-  watched: {
-    added: 'Фильм отмечен как просмотренный',
-    exists: 'Фильм уже в «Просмотрено»',
-    error: 'Не удалось отметить фильм как просмотренный.',
-  },
-  favorite: {
-    added: 'Фильм добавлен в «Любимое»',
-    exists: 'Фильм уже в «Любимом»',
-    error: 'Не удалось добавить фильм в «Любимое».',
-  },
-};
 
 const releaseDateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' });
 const ratingFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
@@ -62,8 +43,10 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const [listStatuses, setListStatuses] = useState<Partial<Record<ListType, ListSaveStatus>>>({});
-  const listSubmissions = useRef<Partial<Record<ListType, AbortController>>>({});
+  const [savedRating, setSavedRating] = useState<number | null>(null);
+  const [ratingPending, setRatingPending] = useState(false);
+  const [ratingError, setRatingError] = useState('');
+  const ratingSubmission = useRef<AbortController | null>(null);
 
   // Рецензия локальное состояние формы
   const [reviewText, setReviewText] = useState<string>('');
@@ -87,7 +70,6 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
     setNotFound(false);
     setError('');
     setMovie(null);
-    setListStatuses({});
     setReviewError('');
     setIsEditingReview(false);
     setPendingReviewAction(null);
@@ -128,22 +110,71 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
     }
     return () => {
       controller.abort();
-      Object.values(listSubmissions.current).forEach((submission) => submission.abort());
-      listSubmissions.current = {};
       reviewSubmission.current?.abort();
       reviewSubmission.current = null;
     };
   }, [id, source, isDemo, navigate, attempt]);
 
+  useEffect(() => {
+    setSavedRating(null);
+    setRatingPending(false);
+    setRatingError('');
+    return () => {
+      ratingSubmission.current?.abort();
+      ratingSubmission.current = null;
+    };
+  }, [id, source, accessToken, attempt]);
+
   // Обработка рейтинга
   const handleRate = async (rating: number | null) => {
-    if (!id || !isDemo) return;
+    if (!movie || (!isDemo && !accessToken) || ratingSubmission.current) return;
+    const movieId = movie.id;
+    const submission = new AbortController();
+    const { signal } = submission;
+    ratingSubmission.current = submission;
+    setRatingPending(true);
+    setRatingError('');
+
     try {
-      await rateMovieApi(id, rating);
-      setMovie((prev) => (prev ? { ...prev, user_rating: rating } : null));
-      showToast(rating ? `Оценка ${rating} сохранена` : 'Оценка удалена');
-    } catch {
-      showToast('Не удалось сохранить оценку');
+      let score = rating;
+      if (isDemo) {
+        await rateMovieApi(movieId, rating);
+      } else if (accessToken) {
+        score = await updateMovieRatingApi(movieId, rating, accessToken, signal);
+      }
+      if (signal.aborted) return;
+
+      if (isDemo) {
+        setMovie((previous) => previous?.id === movieId ? { ...previous, user_rating: score } : previous);
+      } else {
+        setSavedRating(score);
+      }
+      showToast(score === null ? 'Оценка удалена' : `Оценка ${score} сохранена`);
+
+      if (!isDemo) {
+        try {
+          const { average_rating, ratings_count } = await getMovieDetailApi(movieId, signal);
+          if (!signal.aborted) {
+            setMovie((previous) => previous?.id === movieId
+              ? { ...previous, average_rating, ratings_count }
+              : previous);
+          }
+        } catch {
+          if (!signal.aborted) {
+            setRatingError('Не удалось обновить общий рейтинг. Обновите страницу, чтобы увидеть актуальные данные.');
+          }
+        }
+      }
+    } catch (requestError) {
+      if (!signal.aborted) {
+        const fallback = rating === null ? 'Не удалось удалить оценку.' : 'Не удалось сохранить оценку.';
+        setRatingError(getApiErrorMessage(requestError, fallback));
+      }
+    } finally {
+      if (ratingSubmission.current === submission) {
+        ratingSubmission.current = null;
+        setRatingPending(false);
+      }
     }
   };
 
@@ -157,28 +188,6 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
       showToast('Статус обновлен');
     } catch {
       showToast('Не удалось обновить статус');
-    }
-  };
-
-  const handleAddToList = async (listType: ListType) => {
-    if (!movie || !accessToken || listSubmissions.current[listType]) return;
-    const submission = new AbortController();
-    const messages = listMessages[listType];
-    listSubmissions.current[listType] = submission;
-    setListStatuses((previous) => ({ ...previous, [listType]: 'saving' }));
-
-    try {
-      const created = await addMovieListEntryApi(movie.id, listType, accessToken, submission.signal);
-      if (submission.signal.aborted) return;
-      setListStatuses((previous) => ({ ...previous, [listType]: 'saved' }));
-      showToast(created ? messages.added : messages.exists);
-    } catch (requestError) {
-      if (!submission.signal.aborted) {
-        setListStatuses((previous) => ({ ...previous, [listType]: 'idle' }));
-        showToast(getApiErrorMessage(requestError, messages.error));
-      }
-    } finally {
-      if (listSubmissions.current[listType] === submission) delete listSubmissions.current[listType];
     }
   };
 
@@ -306,14 +315,8 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
   const releaseDate = movie.release_date ? releaseDateFormat.format(new Date(movie.release_date)) : movie.year;
   const genres = movie.catalog_genres ?? (movie.genres ?? []).map((name) => ({ id: undefined, name }));
   const reviewFieldsDisabled = !isDemo && (!accessToken || pendingReviewAction !== null);
-  const {
-    watchlist: watchlistStatus = 'idle',
-    watched: watchedStatus = 'idle',
-    favorite: favoriteStatus = 'idle',
-  } = listStatuses;
-  const watchlistActive = isDemo ? movie.user_status === 'watchlist' : watchlistStatus === 'saved';
-  const watchedActive = isDemo ? movie.user_status === 'watched' : watchedStatus === 'saved';
-  const favoriteActive = isDemo ? movie.user_status === 'favorite' : favoriteStatus === 'saved';
+  const selectedRating = isDemo ? movie.user_rating : savedRating;
+  const ratingDisabled = ratingPending || (!isDemo && !accessToken);
 
   return (
     <div className={styles.container}>
@@ -369,32 +372,38 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
           )}
 
           {/* Блок добавления в список */}
-          <div className={styles.statusTabs}>
-            <button
-              type="button"
-              className={`${styles.statusBtn} ${watchlistActive ? styles.activeStatus : ''}`}
-              disabled={!isDemo && (!accessToken || watchlistStatus !== 'idle')}
-              onClick={isDemo ? () => handleStatusChange('watchlist') : () => handleAddToList('watchlist')}
-            >
-              {watchlistStatus === 'saving' ? 'Добавляем…' : 'Планирую посмотреть'}
-            </button>
-            <button
-              type="button"
-              className={`${styles.statusBtn} ${watchedActive ? styles.activeStatus : ''}`}
-              disabled={!isDemo && (!accessToken || watchedStatus !== 'idle')}
-              onClick={isDemo ? () => handleStatusChange('watched') : () => handleAddToList('watched')}
-            >
-              {watchedStatus === 'saving' ? 'Отмечаем…' : 'Просмотрено'}
-            </button>
-            <button
-              type="button"
-              className={`${styles.statusBtn} ${favoriteActive ? styles.activeStatus : ''}`}
-              disabled={!isDemo && (!accessToken || favoriteStatus !== 'idle')}
-              onClick={isDemo ? () => handleStatusChange('favorite') : () => handleAddToList('favorite')}
-            >
-              {favoriteStatus === 'saving' ? 'Сохраняем…' : 'Любимое'}
-            </button>
-          </div>
+          {isDemo ? (
+            <div className={styles.statusTabs}>
+              <button
+                type="button"
+                className={`${styles.statusBtn} ${movie.user_status === 'watchlist' ? styles.activeStatus : ''}`}
+                onClick={() => handleStatusChange('watchlist')}
+              >
+                Планирую посмотреть
+              </button>
+              <button
+                type="button"
+                className={`${styles.statusBtn} ${movie.user_status === 'watched' ? styles.activeStatus : ''}`}
+                onClick={() => handleStatusChange('watched')}
+              >
+                Просмотрено
+              </button>
+              <button
+                type="button"
+                className={`${styles.statusBtn} ${movie.user_status === 'favorite' ? styles.activeStatus : ''}`}
+                onClick={() => handleStatusChange('favorite')}
+              >
+                Любимое
+              </button>
+            </div>
+          ) : (
+            <MovieListButtons
+              key={`${movie.id}:${user?.username ?? ''}:${accessToken ?? ''}`}
+              movieId={movie.id}
+              username={user?.username}
+              accessToken={accessToken}
+            />
+          )}
         </div>
       </div>
 
@@ -402,25 +411,37 @@ export const MoviePage: React.FC<MoviePageProps> = ({ source = 'catalog' }) => {
         {/* Левая колонка: Оценка и Своя рецензия */}
         <div className={styles.leftColumn}>
           {/* Блок "Моя оценка" */}
-          <div className={styles.card}>
+          <div className={styles.card} aria-busy={ratingPending}>
             <h3 className={styles.cardTitle}>Моя оценка</h3>
             <div className={styles.ratingSelector}>
               {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
                 <button
                   key={num}
-                  className={`${styles.rateBtn} ${movie.user_rating === num ? styles.activeRate : ''}`}
-                  disabled={!isDemo}
+                  type="button"
+                  className={`${styles.rateBtn} ${selectedRating === num ? styles.activeRate : ''}`}
+                  aria-pressed={selectedRating === num}
+                  disabled={ratingDisabled}
                   onClick={() => handleRate(num)}
                 >
                   {num}
                 </button>
               ))}
             </div>
-            {movie.user_rating && (
-              <button className={styles.deleteRateBtn} onClick={() => handleRate(null)}>
+            {(isDemo ? Boolean(selectedRating) : Boolean(accessToken)) && (
+              <button
+                type="button"
+                className={styles.deleteRateBtn}
+                disabled={ratingDisabled}
+                onClick={() => handleRate(null)}
+              >
                 Удалить оценку
               </button>
             )}
+            {!isDemo && !accessToken && (
+              <Link to="/login" className={styles.actionBtn}>Войти, чтобы поставить оценку</Link>
+            )}
+            {ratingPending && <p role="status">Обновляем оценку…</p>}
+            {ratingError && <p className={styles.reviewError} role="alert">{ratingError}</p>}
           </div>
 
           {/* Блок "Моя рецензия" */}

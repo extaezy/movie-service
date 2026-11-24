@@ -95,9 +95,13 @@ a.genreTag:focus-visible {
   color: #ffffff;
   border-color: #7c3aed;
 }
-.statusBtn:hover {
+.statusBtn:not(:disabled):hover {
   border-color: #7c3aed;
   color: #ffffff;
+}
+.statusBtn:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 
 .contentGrid {
@@ -151,7 +155,7 @@ a.genreTag:focus-visible {
   color: #0f0f14;
   border-color: #fbbf24;
 }
-.rateBtn:hover {
+.rateBtn:not(:disabled):hover {
   border-color: #fbbf24;
   color: #ffffff;
 }
@@ -163,8 +167,13 @@ a.genreTag:focus-visible {
   cursor: pointer;
   align-self: flex-start;
 }
-.deleteRateBtn:hover {
+.deleteRateBtn:not(:disabled):hover {
   text-decoration: underline;
+}
+.rateBtn:disabled,
+.deleteRateBtn:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 
 .reviewForm {

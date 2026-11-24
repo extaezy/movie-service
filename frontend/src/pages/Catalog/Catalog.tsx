@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { MovieCard } from '../../components/MovieCard/MovieCard';
 import { Spinner } from '../../components/Spinner/Spinner';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { getApiErrorMessage } from '../../api/errors';
-import { getDiscoverMoviesApi, getTmdbPosterUrl, searchMoviesApi } from '../../api/movies';
+import { getDiscoverMoviesApi, getLocalMoviesApi, getTmdbPosterUrl, searchMoviesApi } from '../../api/movies';
 import type { TmdbGenre, TmdbMovie, TmdbSort } from '../../api/movies';
 import styles from './Catalog.module.css';
 
@@ -32,8 +33,10 @@ const tmdbGenres: TmdbGenre[] = [
   { tmdb_id: 14, name: 'Фэнтези' },
 ];
 
-export const Catalog: React.FC = () => {
-  const [movies, setMovies] = useState<TmdbMovie[]>([]);
+type CatalogMovie = Pick<TmdbMovie, 'tmdb_id' | 'title' | 'release_date' | 'poster_path'> & { id?: number };
+
+const CatalogResults = ({ local }: { local: boolean }) => {
+  const [movies, setMovies] = useState<CatalogMovie[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState('');
   const [catalogAttempt, setCatalogAttempt] = useState(0);
@@ -43,7 +46,7 @@ export const Catalog: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [selectedGenre, setSelectedGenre] = useState<string>('');
   const [yearFilter, setYearFilter] = useState<string>('');
-  const [sort, setSort] = useState<TmdbSort>('popularity_desc');
+  const [sort, setSort] = useState<TmdbSort>(local ? 'release_date_desc' : 'popularity_desc');
 
   // Пагинация
   const [page, setPage] = useState<number>(1);
@@ -78,20 +81,26 @@ export const Catalog: React.FC = () => {
     setLoading(true);
     setError('');
 
-    const request = debouncedSearch
-      ? searchMoviesApi(debouncedSearch, page, controller.signal)
-      : getDiscoverMoviesApi({
+    const request = local
+      ? getLocalMoviesApi({
           page,
-          tmdb_genre_id: selectedGenre ? Number(selectedGenre) : undefined,
           year,
-          sort,
-        }, controller.signal);
+          sort: sort === 'release_date_asc' ? 'release_date_asc' : 'release_date_desc',
+        }, controller.signal)
+      : debouncedSearch
+        ? searchMoviesApi(debouncedSearch, page, controller.signal)
+        : getDiscoverMoviesApi({
+            page,
+            tmdb_genre_id: selectedGenre ? Number(selectedGenre) : undefined,
+            year,
+            sort,
+          }, controller.signal);
 
     request
       .then((data) => {
         if (controller.signal.aborted) return;
         setMovies(data.results);
-        setTotalPages(Math.min(data.total_pages, 500));
+        setTotalPages(local ? data.total_pages : Math.min(data.total_pages, 500));
       })
       .catch((requestError) => {
         if (!controller.signal.aborted) {
@@ -103,38 +112,42 @@ export const Catalog: React.FC = () => {
       });
 
     return () => controller.abort();
-  }, [debouncedSearch, selectedGenre, year, sort, page, catalogAttempt, validationError]);
+  }, [local, debouncedSearch, selectedGenre, year, sort, page, catalogAttempt, validationError]);
 
   const retryCatalog = () => setCatalogAttempt((attempt) => attempt + 1);
 
   return (
-    <div className={styles.container}>
+    <>
       <div className={styles.filtersBar}>
-        <input
-          type="text"
-          className={styles.searchInput}
-          placeholder="Поиск по названию..."
-          aria-label="Поиск по названию"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <select
-          className={styles.select}
-          aria-label="Жанр"
-          disabled={searching}
-          value={selectedGenre}
-          onChange={(e) => {
-            setSelectedGenre(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Все жанры</option>
-          {tmdbGenres.map((genre) => (
-            <option key={genre.tmdb_id} value={genre.tmdb_id}>
-              {genre.name}
-            </option>
-          ))}
-        </select>
+        {!local && (
+          <>
+            <input
+              type="text"
+              className={styles.searchInput}
+              placeholder="Поиск по названию..."
+              aria-label="Поиск по названию"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <select
+              className={styles.select}
+              aria-label="Жанр"
+              disabled={searching}
+              value={selectedGenre}
+              onChange={(e) => {
+                setSelectedGenre(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Все жанры</option>
+              {tmdbGenres.map((genre) => (
+                <option key={genre.tmdb_id} value={genre.tmdb_id}>
+                  {genre.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <input
           type="number"
           className={styles.yearInput}
@@ -159,7 +172,7 @@ export const Catalog: React.FC = () => {
             setPage(1);
           }}
         >
-          <option value="popularity_desc">По популярности</option>
+          {!local && <option value="popularity_desc">По популярности</option>}
           <option value="release_date_desc">Сначала новые</option>
           <option value="release_date_asc">Сначала старые</option>
         </select>
@@ -174,15 +187,17 @@ export const Catalog: React.FC = () => {
       ) : (
         <>
           {movies.length === 0 ? (
-            <EmptyState message="Ничего не найдено" />
+            <EmptyState message={local && year === undefined && totalPages === 0
+              ? 'В каталоге пока нет фильмов'
+              : 'Ничего не найдено'} />
           ) : (
             <div className={styles.grid}>
               {movies.map((movie) => (
                 <MovieCard
-                  key={movie.tmdb_id}
-                  to={`/movies/tmdb/${movie.tmdb_id}`}
+                  key={movie.id ?? movie.tmdb_id}
+                  to={movie.id === undefined ? `/movies/tmdb/${movie.tmdb_id}` : `/movies/${movie.id}`}
                   movie={{
-                    id: String(movie.tmdb_id),
+                    id: String(movie.id ?? movie.tmdb_id),
                     title: movie.title,
                     poster_url: getTmdbPosterUrl(movie.poster_path),
                     year: movie.release_date ? Number(movie.release_date.slice(0, 4)) : undefined,
@@ -215,6 +230,25 @@ export const Catalog: React.FC = () => {
           )}
         </>
       )}
+    </>
+  );
+};
+
+export const Catalog: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const local = searchParams.get('catalog') === 'local';
+
+  return (
+    <div className={styles.container}>
+      <nav className={styles.catalogNav} aria-label="Источник фильмов">
+        <Link to="/" className={styles.catalogLink} aria-current={local ? undefined : 'page'}>
+          Все фильмы
+        </Link>
+        <Link to="/?catalog=local" className={styles.catalogLink} aria-current={local ? 'page' : undefined}>
+          В каталоге
+        </Link>
+      </nav>
+      <CatalogResults key={local ? 'local' : 'tmdb'} local={local} />
     </div>
   );
 };

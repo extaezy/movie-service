@@ -148,7 +148,7 @@ export const Profile: React.FC = () => {
               <div className={styles.moviesGrid}>
                 {profile.lists?.[activeListSubTab]?.length ? (
                   profile.lists[activeListSubTab].map((movie) => (
-                    <MovieCard key={movie.id} movie={movie} />
+                    <MovieCard key={movie.id} movie={movie} to={`/demo/movies/${movie.id}`} />
                   ))
                 ) : (
                   <p className={styles.emptyText}>Список пуст</p>
@@ -163,7 +163,7 @@ export const Profile: React.FC = () => {
                 {profile.ratings?.length ? (
                   profile.ratings.map((item) => (
                     <div key={item.movie.id} className={styles.ratedCardWrapper}>
-                      <MovieCard movie={item.movie} />
+                      <MovieCard movie={item.movie} to={`/demo/movies/${item.movie.id}`} />
                       <div className={styles.ratingBadge}>★ {item.rating}</div>
                     </div>
                   ))
@@ -180,7 +180,7 @@ export const Profile: React.FC = () => {
                 profile.reviews.map((rev) => (
                   <div key={rev.id} className={styles.reviewCard}>
                     <div className={styles.reviewHeader}>
-                      <Link to={`/movies/${rev.movie.id}`} className={styles.movieLink}>
+                      <Link to={`/demo/movies/${rev.movie.id}`} className={styles.movieLink}>
                         {rev.movie.title}
                       </Link>
                       <span className={styles.reviewDate}>{new Date(rev.created_at).toLocaleDateString()}</span>

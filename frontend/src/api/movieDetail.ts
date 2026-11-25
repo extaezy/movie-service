@@ -1,4 +1,7 @@
 import { apiClient } from './client';
+import { httpClient } from './httpClient';
+import { getTmdbPosterUrl } from './movies';
+import type { TmdbGenre, TmdbMovie } from './movies';
 import type { Movie } from '../types';
 
 export interface Review {
@@ -22,7 +25,14 @@ export interface CriticReview {
   url: string;
 }
 
-export interface MovieDetail extends Movie {
+export interface MovieDetail extends Omit<Movie, 'year'> {
+  year?: number;
+  release_date?: string;
+  catalog_genres?: { id: number; name: string }[];
+  average_rating?: number | null;
+  ratings_count?: number;
+  tmdb_vote_average?: number | null;
+  tmdb_vote_count?: number | null;
   duration?: number;
   description?: string;
   user_rating?: number | null;
@@ -36,9 +46,132 @@ export interface MovieDetail extends Movie {
   critic_reviews: CriticReview[];
 }
 
-export const getMovieDetailApi = async (id: string): Promise<MovieDetail> => {
-  const response = await apiClient.get<MovieDetail>(`/movies/${id}`);
+interface MovieDetailResponse extends Omit<TmdbMovie, 'genre_ids'> {
+  id: number;
+  runtime: number | null;
+  genres: (TmdbGenre & { id: number })[];
+  average_rating: number | null;
+  ratings_count: number;
+  tmdb_vote_average: number | null;
+  tmdb_vote_count: number | null;
+  tmdb_rating_updated_at: string | null;
+}
+
+interface MovieReviewResponse {
+  id: number;
+  movie_id: number;
+  text: string;
+  created_at: string;
+  contains_spoilers: boolean;
+}
+
+type MovieReviewInput = Pick<MovieReviewResponse, 'text' | 'contains_spoilers'>;
+
+interface MovieReviewsResponse {
+  page: number;
+  page_size: number;
+  total_results: number;
+  total_pages: number;
+  results: (MovieReviewResponse & { author_username: string })[];
+}
+
+export const getMovieReviewsApi = async (id: string, page: number, signal: AbortSignal) => {
+  const { data } = await httpClient.get<MovieReviewsResponse>(`/movies/${id}/reviews`, {
+    params: { page },
+    signal,
+  });
+  const reviews: Review[] = data.results.map((review) => ({
+    id: String(review.id),
+    author: { username: review.author_username },
+    text: review.text,
+    created_at: review.created_at,
+    is_spoiler: review.contains_spoilers,
+  }));
+  return { page: data.page, totalPages: data.total_pages, reviews };
+};
+
+export const createMovieReviewApi = async (
+  id: string,
+  review: MovieReviewInput,
+  token: string,
+  signal: AbortSignal,
+): Promise<MovieReviewResponse> => {
+  const { data } = await httpClient.post<MovieReviewResponse>(`/movies/${id}/reviews`, review, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
+  });
+  return data;
+};
+
+export const updateMovieReviewApi = async (
+  reviewId: string,
+  changes: Partial<MovieReviewInput>,
+  token: string,
+  signal: AbortSignal,
+) => {
+  const { data } = await httpClient.patch<MovieReviewResponse & { updated_at: string }>(
+    `/reviews/${reviewId}`,
+    changes,
+    { headers: { Authorization: `Bearer ${token}` }, signal },
+  );
+  return data;
+};
+
+export const removeMovieReviewApi = async (
+  reviewId: string,
+  token: string,
+  signal: AbortSignal,
+): Promise<void> => {
+  await httpClient.delete(`/reviews/${reviewId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
+  });
+};
+
+export const openTmdbMovieApi = async (id: string, signal: AbortSignal): Promise<number> => {
+  const response = await httpClient.get<MovieDetailResponse>(`/movies/tmdb/${id}`, { signal });
+  return response.data.id;
+};
+
+export const getMovieDetailApi = async (id: string, signal: AbortSignal): Promise<MovieDetail> => {
+  const { data } = await httpClient.get<MovieDetailResponse>(`/movies/${id}`, { signal });
+  return {
+    id: String(data.id),
+    title: data.title,
+    release_date: data.release_date ?? undefined,
+    poster_url: getTmdbPosterUrl(data.poster_path),
+    genres: data.genres.map(({ name }) => name),
+    catalog_genres: data.genres,
+    duration: data.runtime ?? undefined,
+    description: data.overview ?? undefined,
+    average_rating: data.average_rating,
+    ratings_count: data.ratings_count,
+    tmdb_vote_average: data.tmdb_vote_average,
+    tmdb_vote_count: data.tmdb_vote_count,
+    reviews: [],
+    critic_reviews: [],
+  };
+};
+
+export const getDemoMovieDetailApi = async (id: string, signal: AbortSignal): Promise<MovieDetail> => {
+  const response = await apiClient.get<MovieDetail>(`/movies/${encodeURIComponent(id)}`, { signal });
   return response.data;
+};
+
+export const updateMovieRatingApi = async (
+  movieId: string,
+  score: number | null,
+  token: string,
+  signal: AbortSignal,
+): Promise<number | null> => {
+  const config = { headers: { Authorization: `Bearer ${token}` }, signal };
+  const url = `/movies/${movieId}/rating`;
+  if (score === null) {
+    await httpClient.delete(url, config);
+    return null;
+  }
+  const { data } = await httpClient.put<{ movie_id: number; score: number }>(url, { score }, config);
+  return data.score;
 };
 
 export const rateMovieApi = async (id: string, rating: number | null): Promise<void> => {

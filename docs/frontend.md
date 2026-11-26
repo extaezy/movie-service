@@ -28,6 +28,8 @@
 
 При выборе фильма из витрины или поиска frontend вызывает `GET /movies/tmdb/{tmdb_id}`, затем открывает `/movies/:id` с внутренним `id` полученной карточки. Прямая ссылка `/movies/:id` загружает `GET /movies/{id}`. Пока карточка загружается, отображается loading; при 404 — фильм не найден, при 502/503 — ошибка с повтором запроса. Для запросов оценок и списков используется внутренний ID карточки.
 
+После получения карточки фильма блок «Похожие фильмы» может загрузить `GET /movies/{id}/similar` и показать до 15 элементов `results`. Новый запрос даёт новую случайную подборку; уже загруженный блок не обновляется по таймеру. При выборе кандидата вызывается `GET /movies/tmdb/{tmdb_id}`, после чего открывается внутренний маршрут фильма. Блок имеет собственные состояния loading, success, empty и error с повтором; его ошибка не скрывает основную карточку. Подключение компонента к backend остаётся отдельным этапом.
+
 ## Компоненты
 
 `AppLayout`, `Header`, `SearchBar`, `MovieCard`, `MovieGrid`, `MovieFilters`, `Pagination`, `MovieHero`, `RatingSummary`, `CriticReviewList`, `UserReviewList`, `ProfileHeader`, `ProfileTabs`, `PrivacyNotice`, `AuthForm`, `ProfileForm`, `RatingForm`, `ReviewForm`, `FriendRequestList`, `FriendButton`, `AdminSyncPanel`.

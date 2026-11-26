@@ -19,8 +19,14 @@ from app.repositories.movie_repository import (
     save_movie,
 )
 from app.repositories.rating_repository import delete_rating, upsert_rating
-from app.schemas.movies import MovieDetailResponse, MoviePage, MovieSort
+from app.schemas.movies import (
+    MovieDetailResponse,
+    MoviePage,
+    MovieSort,
+    SimilarMoviesResponse,
+)
 from app.schemas.ratings import RatingResponse, RatingUpdate
+from app.services.similar_movie_service import get_similar_movies
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 MovieId = Annotated[int, Path(ge=1, le=2147483647)]
@@ -83,6 +89,25 @@ async def get_movie(movie_id: MovieId, session: DatabaseSession):
     if movie is None:
         raise HTTPException(404, "Фильм не найден")
     return movie
+
+
+@router.get(
+    "/{movie_id}/similar",
+    response_model=SimilarMoviesResponse,
+    response_model_by_alias=False,
+)
+async def similar_movies(
+    movie_id: MovieId, session: DatabaseSession, response: Response
+) -> SimilarMoviesResponse:
+    movie = await session.get(Movie, movie_id)
+    if movie is None:
+        raise HTTPException(404, "Фильм не найден")
+    tmdb_id = movie.tmdb_id
+    await session.rollback()
+    async with open_tmdb_client() as client:
+        recommendations = await get_similar_movies(client, tmdb_id)
+    response.headers["Cache-Control"] = "no-store"
+    return recommendations
 
 
 @router.put("/{movie_id}/rating", response_model=RatingResponse)

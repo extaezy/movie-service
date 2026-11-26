@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.integrations.tmdb import TMDBMovie
+
 MovieSort = Literal["release_date_asc", "release_date_desc"]
 
 
@@ -43,3 +45,7 @@ class MoviePage(BaseModel):
     total_results: int
     total_pages: int
     results: list[MovieResponse]
+
+
+class SimilarMoviesResponse(BaseModel):
+    results: list[TMDBMovie]

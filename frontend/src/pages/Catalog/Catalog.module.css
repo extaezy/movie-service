@@ -6,6 +6,28 @@
   flex-direction: column;
   gap: 24px;
 }
+.catalogNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.catalogLink {
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #d1d5db;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+.catalogLink:hover,
+.catalogLink[aria-current='page'] {
+  border-color: #7c3aed;
+  color: #ffffff;
+}
+.catalogLink[aria-current='page'] {
+  background-color: #7c3aed;
+}
 .filtersBar {
   display: flex;
   gap: 16px;

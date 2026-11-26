@@ -12,6 +12,7 @@ import { Register } from './pages/Register/Register';
 import { Profile } from './pages/Profile/Profile';
 import { EditProfile } from './pages/EditProfile/EditProfile';
 import { Lists } from './pages/Lists/Lists';
+import { SavedMovieList } from './pages/Lists/SavedMovieList';
 import { Friends } from './pages/Friends/Friends';
 
 // Защищённый маршрут
@@ -33,6 +34,8 @@ const AppLayout: React.FC = () => {
         <Routes>
           <Route path="/" element={<Catalog />} />
           <Route path="/movies/:id" element={<MoviePage />} />
+          <Route path="/movies/tmdb/:id" element={<MoviePage source="tmdb" />} />
+          <Route path="/demo/movies/:id" element={<MoviePage source="demo" />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/profile/:username" element={<Profile />} />
@@ -44,6 +47,17 @@ const AppLayout: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          {(['watchlist', 'watched', 'favorite'] as const).map((listType) => (
+            <Route
+              key={listType}
+              path={`/lists/${listType}`}
+              element={
+                <ProtectedRoute>
+                  <SavedMovieList key={listType} listType={listType} />
+                </ProtectedRoute>
+              }
+            />
+          ))}
           <Route
             path="/lists/:type"
             element={

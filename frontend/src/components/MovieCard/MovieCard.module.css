@@ -27,25 +27,39 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  background: rgba(15, 15, 20, 0.6);
-  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(15, 15, 20, 0.65);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  display: flex;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #9ca3af;
-  font-size: 16px;
+  line-height: 0;
+  color: #d1d5db;
   cursor: pointer;
-  transition: color 0.2s, background 0.2s;
+  transition: color 0.2s, background-color 0.2s, transform 0.15s, border-color 0.2s;
 }
 .favoriteBtn.active {
   color: #fbbf24;
-  background: rgba(15, 15, 20, 0.8);
+  background: rgba(15, 15, 20, 0.85);
+  border-color: rgba(251, 191, 36, 0.5);
 }
-.favoriteBtn:hover {
+.favoriteBtn:hover:not(:disabled) {
   color: #fbbf24;
+  transform: scale(1.06);
+}
+.favoriteBtn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.starSvg {
+  width: 17px;
+  height: 17px;
+  display: block;
 }
 .info {
   padding: 12px;

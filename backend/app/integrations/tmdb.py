@@ -48,7 +48,9 @@ class TMDBSettings(BaseSettings):
             or value.query
             or value.fragment
         ):
-            raise ValueError("TMDB_BASE_URL must use HTTPS without credentials or query")
+            raise ValueError(
+                "TMDB_BASE_URL must use HTTPS without credentials or query"
+            )
         return value
 
 
@@ -71,6 +73,18 @@ class TMDBMovie(BaseModel):
 class TMDBSearchResult(BaseModel):
     page: int = Field(ge=1)
     results: list[TMDBMovie]
+    total_pages: int = Field(ge=0)
+    total_results: int = Field(ge=0)
+
+
+class TMDBRecommendedMovie(TMDBMovie):
+    tmdb_id: int = Field(validation_alias="id", gt=0, le=2147483647)
+    adult: bool = Field(strict=True)
+
+
+class TMDBRecommendationsPage(BaseModel):
+    page: int = Field(ge=1)
+    results: list[TMDBRecommendedMovie]
     total_pages: int = Field(ge=0)
     total_results: int = Field(ge=0)
 
@@ -145,6 +159,31 @@ class TMDBClient:
         if not 1 <= page <= TMDB_MAX_PAGE:
             raise ValueError("Search page must be between 1 and 500")
         return await self._get_movie_page("search/movie", page, {"query": query})
+
+    async def get_recommendations(
+        self, tmdb_id: int, page: int = 1
+    ) -> TMDBRecommendationsPage:
+        try:
+            response = await self.client.get(
+                f"movie/{tmdb_id}/recommendations",
+                params={"page": page, "language": self.language},
+            )
+            response.raise_for_status()
+            recommendations = TMDBRecommendationsPage.model_validate(response.json())
+            if recommendations.page != page:
+                raise ValueError("Unexpected TMDB recommendations page")
+            return recommendations
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "TMDB recommendations failed with HTTP %s", exc.response.status_code
+            )
+            raise HTTPException(502, "TMDB временно недоступен") from None
+        except httpx.RequestError:
+            logger.warning("TMDB recommendations connection failed")
+            raise HTTPException(502, "Не удалось подключиться к TMDB") from None
+        except (ValidationError, ValueError):
+            logger.warning("TMDB recommendations returned invalid data")
+            raise HTTPException(502, "TMDB вернул некорректные данные") from None
 
     async def discover_movies(
         self,

@@ -42,3 +42,11 @@ async def get_optional_current_user(
     if credentials is None:
         return None
     return await get_current_user(credentials, session)
+
+
+async def get_current_admin(
+    user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Требуются права администратора")
+    return user

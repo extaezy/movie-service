@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.auth import register
 from app.api.auth import router as auth_router
+from app.api.critic_reviews import router as critic_reviews_router
 from app.api.friendships import router as friendships_router
 from app.api.lists import router as lists_router
 from app.api.movies import router as movies_router
@@ -31,6 +32,7 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+app.include_router(critic_reviews_router)
 app.include_router(friendships_router)
 app.include_router(lists_router)
 app.include_router(movies_router)

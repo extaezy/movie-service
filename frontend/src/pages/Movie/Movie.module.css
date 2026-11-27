@@ -4,27 +4,75 @@
   padding: 32px 24px;
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 28px;
 }
+
+/* Hero-блок с замыленным постером на фоне */
 .heroSection {
+  position: relative;
+  overflow: hidden;
+  background-color: #1a1a24;
+  padding: 32px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+}
+
+.heroBackdrop {
+  position: absolute;
+  inset: -24px;
+  background-size: cover;
+  background-position: center 25%;
+  filter: blur(28px) brightness(0.55) saturate(1.3);
+  transform: scale(1.1);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.heroOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(15, 15, 20, 0.9) 0%,
+      rgba(15, 15, 20, 0.72) 55%,
+      rgba(15, 15, 20, 0.5) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(15, 15, 20, 0.25) 0%,
+      rgba(15, 15, 20, 0.85) 100%
+    );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 2;
   display: flex;
   gap: 32px;
-  background-color: #1a1a24;
-  padding: 24px;
-  border-radius: 12px;
 }
+
 @media (max-width: 768px) {
   .heroSection {
+    padding: 20px;
+  }
+  .heroContent {
     flex-direction: column;
   }
 }
+
 .posterWrapper {
-  width: 260px;
+  width: 240px;
   flex-shrink: 0;
   aspect-ratio: 2 / 3;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   background-color: #272733;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 .poster {
   width: 100%;
@@ -38,15 +86,17 @@
   flex: 1;
 }
 .title {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: #ffffff;
   margin: 0;
+  line-height: 1.15;
 }
 .detailsRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
-  color: #9ca3af;
+  color: #d1d5db;
   font-size: 14px;
 }
 .genres {
@@ -55,19 +105,57 @@
   flex-wrap: wrap;
 }
 .genreTag {
-  background-color: rgba(124, 58, 237, 0.2);
-  color: #8b5cf6;
-  padding: 4px 10px;
-  border-radius: 6px;
+  background-color: rgba(124, 58, 237, 0.28);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  color: #ddd6fe;
+  padding: 4px 12px;
+  border-radius: 999px;
   font-size: 13px;
   font-weight: 500;
+  text-decoration: none;
+}
+a.genreTag:hover,
+a.genreTag:focus-visible {
+  background-color: rgba(124, 58, 237, 0.45);
+  color: #ffffff;
 }
 .description {
-  color: #d1d5db;
+  color: #e5e7eb;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.55;
   margin: 0;
+  max-width: 720px;
 }
+
+/* Блок рейтингов TMDB и Movie Service */
+.ratingsRow {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.ratingBadge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ratingBadgeValue {
+  font-size: 24px;
+  font-weight: 700;
+  color: #fbbf24;
+  line-height: 1.1;
+}
+.localRatingValue {
+  color: #a78bfa;
+}
+.ratingBadgeLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+}
+
 .statusTabs {
   display: flex;
   gap: 12px;
@@ -75,9 +163,10 @@
   margin-top: auto;
 }
 .statusBtn {
-  background-color: #0f0f14;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #9ca3af;
+  background-color: rgba(15, 15, 20, 0.75);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #d1d5db;
   padding: 8px 16px;
   border-radius: 8px;
   cursor: pointer;
@@ -90,9 +179,70 @@
   color: #ffffff;
   border-color: #7c3aed;
 }
-.statusBtn:hover {
+.statusBtn:not(:disabled):hover {
   border-color: #7c3aed;
   color: #ffffff;
+}
+.statusBtn:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+/* Навигация вкладок страницы */
+.pageTabs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.pageTabBtn {
+  position: relative;
+  background: none;
+  border: none;
+  padding: 12px 4px;
+  color: #9ca3af;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.pageTabBtn:hover {
+  color: #ffffff;
+}
+.pageTabActive {
+  color: #ffffff;
+}
+.pageTabActive::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background-color: #7c3aed;
+}
+.tabCountBadge {
+  background-color: rgba(124, 58, 237, 0.22);
+  color: #c4b5fd;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* Вкладка рекомендованных фильмов */
+.recommendedSection {
+  width: 100%;
+}
+.recommendedGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 20px;
 }
 
 .contentGrid {
@@ -146,7 +296,7 @@
   color: #0f0f14;
   border-color: #fbbf24;
 }
-.rateBtn:hover {
+.rateBtn:not(:disabled):hover {
   border-color: #fbbf24;
   color: #ffffff;
 }
@@ -158,14 +308,24 @@
   cursor: pointer;
   align-self: flex-start;
 }
-.deleteRateBtn:hover {
+.deleteRateBtn:not(:disabled):hover {
   text-decoration: underline;
+}
+.rateBtn:disabled,
+.deleteRateBtn:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 
 .reviewForm {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.reviewError {
+  color: #f87171;
+  font-size: 14px;
+  margin: 0;
 }
 .textarea {
   background-color: #0f0f14;
@@ -201,8 +361,12 @@
   font-weight: 500;
   cursor: pointer;
 }
-.saveBtn:hover {
+.saveBtn:hover:not(:disabled) {
   background-color: #8b5cf6;
+}
+.saveBtn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 .cancelBtn {
   background: transparent;
@@ -250,8 +414,12 @@
 .actionBtn.danger {
   color: #ef4444;
 }
-.actionBtn:hover {
+.actionBtn:hover:not(:disabled) {
   text-decoration: underline;
+}
+.actionBtn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .reviewsList {
@@ -290,6 +458,10 @@
   color: #d1d5db;
   margin: 0;
   line-height: 1.4;
+}
+.reviewCard .reviewBody {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .readMoreLink {
   font-size: 13px;

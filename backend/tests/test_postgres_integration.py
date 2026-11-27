@@ -1636,3 +1636,375 @@ async def test_catalog_keeps_stable_order_across_page_boundary(
     assert second_first_response.json() == first_page_data
 
     assert expected_upstream_requests == catalog_tmdb.upstream_requests
+
+
+async def test_adding_same_movie_to_watchlist_does_not_duplicate_it(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    username = "reviewer"
+    list_type = "watchlist"
+    add_endpoint = f"/movies/{movie_id}/lists"
+    list_endpoint = f"/users/{username}/movies"
+    add_payload = {"list_type": list_type}
+    list_params = {"list_type": list_type}
+
+    first_response = await client.post(
+        add_endpoint, json=add_payload, headers=rating_headers
+    )
+    assert first_response.status_code == 201
+    second_response = await client.post(
+        add_endpoint, json=add_payload, headers=rating_headers
+    )
+    assert second_response.status_code == 200
+    list_response = await client.get(
+        list_endpoint, headers=rating_headers, params=list_params
+    )
+    assert list_response.status_code == 200
+    list_data = list_response.json()
+    assert list_data["total_results"] == 1
+    assert len(list_data["results"]) == 1
+    assert list_data["results"][0]["id"] == movie_id
+
+
+async def test_removing_same_movie_from_watchlist_twice_keeps_it_empty(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    username = "reviewer"
+    list_type = "watchlist"
+    add_endpoint = f"/movies/{movie_id}/lists"
+    remove_endpoint = f"{add_endpoint}/{list_type}"
+    list_endpoint = f"/users/{username}/movies"
+    list_params = {"list_type": list_type}
+
+    added = await client.post(add_endpoint, json=list_params, headers=rating_headers)
+    assert added.status_code == 201
+
+    first_delete = await client.delete(remove_endpoint, headers=rating_headers)
+    second_delete = await client.delete(remove_endpoint, headers=rating_headers)
+    assert first_delete.status_code == 204
+    assert second_delete.status_code == 204
+    assert first_delete.content == second_delete.content == b""
+
+    response = await client.get(
+        list_endpoint, params=list_params, headers=rating_headers
+    )
+    assert response.status_code == 200
+    list_data = response.json()
+    assert list_data["total_results"] == 0
+    assert list_data["results"] == []
+
+
+async def test_removing_movie_from_watchlist_preserves_other_lists(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    username = "reviewer"
+    removed_list = "watchlist"
+    retained_lists = ("watched", "favorite")
+    add_endpoint = f"/movies/{movie_id}/lists"
+    remove_endpoint = f"{add_endpoint}/{removed_list}"
+    list_endpoint = f"/users/{username}/movies"
+
+    for list_type in (removed_list, *retained_lists):
+        added = await client.post(
+            add_endpoint, json={"list_type": list_type}, headers=rating_headers
+        )
+        assert added.status_code == 201
+
+    removed = await client.delete(remove_endpoint, headers=rating_headers)
+    assert removed.status_code == 204
+
+    expected_ids_by_list = {
+        "watchlist": [],
+        "watched": [movie_id],
+        "favorite": [movie_id],
+    }
+    for list_type, expected_ids in expected_ids_by_list.items():
+        response = await client.get(
+            list_endpoint, params={"list_type": list_type}, headers=rating_headers
+        )
+        assert response.status_code == 200
+        list_data = response.json()
+        assert list_data["total_results"] == len(expected_ids)
+        assert [movie["id"] for movie in list_data["results"]] == expected_ids
+
+
+async def test_removing_movie_from_watchlist_without_token_preserves_entry(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    username = "reviewer"
+    list_type = "watchlist"
+    add_endpoint = f"/movies/{movie_id}/lists"
+    remove_endpoint = f"{add_endpoint}/{list_type}"
+    list_endpoint = f"/users/{username}/movies"
+    add_payload = {"list_type": list_type}
+    list_params = {"list_type": list_type}
+
+    add_response = await client.post(
+        add_endpoint, json=add_payload, headers=rating_headers
+    )
+    assert add_response.status_code == 201
+    del_response = await client.delete(remove_endpoint)
+    assert del_response.status_code == 401
+    get_response = await client.get(
+        list_endpoint, params=list_params, headers=rating_headers
+    )
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 1
+    assert len(get_data["results"]) == 1
+    assert get_data["results"][0]["id"] == movie_id
+
+
+async def test_second_review_for_same_movie_preserves_first_review(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    endpoint = f"/movies/{movie_id}/reviews"
+    first_payload = {"text": "Первая рецензия", "contains_spoilers": False}
+    second_payload = {"text": "Вторая рецензия", "contains_spoilers": True}
+
+    first_response = await client.post(
+        endpoint, json=first_payload, headers=rating_headers
+    )
+    assert first_response.status_code == 201
+    second_response = await client.post(
+        endpoint, json=second_payload, headers=rating_headers
+    )
+    assert second_response.status_code == 409
+    get_response = await client.get(endpoint)
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 1
+    assert len(get_data["results"]) == 1
+    assert get_data["results"][0]["text"] == first_payload["text"]
+    assert get_data["results"][0]["contains_spoilers"] is False
+
+
+async def test_updating_review_text_preserves_spoiler_flag(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    reviews_endpoint = f"/movies/{movie_id}/reviews"
+    create_payload = {"text": "Исходная рецензия", "contains_spoilers": True}
+    update_payload = {"text": "Обновлённая рецензия"}
+
+    create_response = await client.post(
+        reviews_endpoint, json=create_payload, headers=rating_headers
+    )
+    assert create_response.status_code == 201
+    review_id = create_response.json()["id"]
+    patch_url = f"/reviews/{review_id}"
+    update_response = await client.patch(
+        patch_url, json=update_payload, headers=rating_headers
+    )
+    assert update_response.status_code == 200
+    update_data = update_response.json()
+    assert update_data["id"] == review_id
+    assert update_data["text"] == update_payload["text"]
+    assert update_data["contains_spoilers"] is True
+    get_response = await client.get(reviews_endpoint)
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 1
+    assert get_data["results"][0]["id"] == review_id
+    assert get_data["results"][0]["text"] == update_payload["text"]
+    assert get_data["results"][0]["contains_spoilers"] is True
+
+
+async def test_deleting_review_allows_author_to_create_another(
+    client, records, rating_headers
+):
+    _, movie_id = records
+    reviews_endpoint = f"/movies/{movie_id}/reviews"
+    first_payload = {"text": "Первая рецензия", "contains_spoilers": False}
+    second_payload = {"text": "Новая рецензия", "contains_spoilers": True}
+
+    first_response = await client.post(
+        reviews_endpoint, json=first_payload, headers=rating_headers
+    )
+    assert first_response.status_code == 201
+    review_id = first_response.json()["id"]
+    del_url = f"/reviews/{review_id}"
+    del_response = await client.delete(del_url, headers=rating_headers)
+    assert del_response.status_code == 204
+    assert del_response.content == b""
+    get_response = await client.get(reviews_endpoint)
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 0
+    assert len(get_data["results"]) == 0
+    second_response = await client.post(
+        reviews_endpoint, json=second_payload, headers=rating_headers
+    )
+    assert second_response.status_code == 201
+    second_data = second_response.json()
+    assert second_data["text"] == second_payload["text"]
+    assert second_data["contains_spoilers"] is True
+
+
+async def test_another_user_cannot_update_or_delete_review(
+    client, database, records, rating_headers
+):
+    _, movie_id = records
+    reviews_endpoint = f"/movies/{movie_id}/reviews"
+    create_payload = {"text": "Рецензия автора", "contains_spoilers": False}
+    update_payload = {"text": "Чужое изменение", "contains_spoilers": True}
+
+    first_response = await client.post(
+        reviews_endpoint, json=create_payload, headers=rating_headers
+    )
+    assert first_response.status_code == 201
+    review_id = first_response.json()["id"]
+    review_url = f"/reviews/{review_id}"
+
+    from app.core.tokens import create_access_token
+
+    async with database.sessions() as session, session.begin():
+        second_user = User(
+            username="second_reviewer",
+            email="second.reviewer@example.com",
+            hashed_password="test-only",
+        )
+        session.add(second_user)
+
+    second_token = create_access_token(str(second_user.id))
+    second_headers = {"Authorization": f"Bearer {second_token}"}
+
+    patch_response = await client.patch(
+        review_url, json=update_payload, headers=second_headers
+    )
+    assert patch_response.status_code == 404
+    del_response = await client.delete(review_url, headers=second_headers)
+    assert del_response.status_code == 404
+    get_response = await client.get(reviews_endpoint)
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 1
+    assert get_data["results"][0]["id"] == review_id
+    assert get_data["results"][0]["text"] == create_payload["text"]
+    assert get_data["results"][0]["contains_spoilers"] is False
+
+
+async def test_guest_can_read_review_from_private_profile(
+    client, database, records, rating_headers
+):
+    user_id, movie_id = records
+    reviews_endpoint = f"/movies/{movie_id}/reviews"
+    create_payload = {"text": "Рецензия закрытого профиля", "contains_spoilers": False}
+
+    async with database.sessions() as session, session.begin():
+        profile = Profile(user_id=user_id, is_private=True)
+        session.add(profile)
+
+    create_response = await client.post(
+        reviews_endpoint, json=create_payload, headers=rating_headers
+    )
+    assert create_response.status_code == 201
+    review_id = create_response.json()["id"]
+    get_response = await client.get(reviews_endpoint)
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 1
+    assert get_data["results"][0]["id"] == review_id
+    assert get_data["results"][0]["text"] == create_payload["text"]
+    assert get_data["results"][0]["contains_spoilers"] is False
+
+
+async def test_private_watchlist_is_visible_to_owner_but_hidden_from_guest(
+    client, database, records, rating_headers
+):
+    user_id, movie_id = records
+    username = "reviewer"
+    missing_username = "missing_reviewer"
+    list_type = "watchlist"
+    add_endpoint = f"/movies/{movie_id}/lists"
+    owner_list_endpoint = f"/users/{username}/movies"
+    missing_list_endpoint = f"/users/{missing_username}/movies"
+    list_params = {"list_type": list_type}
+
+    async with database.sessions() as session, session.begin():
+        profile = Profile(user_id=user_id, is_private=True)
+        session.add(profile)
+
+    add_response = await client.post(
+        add_endpoint, json=list_params, headers=rating_headers
+    )
+    assert add_response.status_code == 201
+    get_response = await client.get(
+        owner_list_endpoint, params=list_params, headers=rating_headers
+    )
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["total_results"] == 1
+    assert get_data["results"][0]["id"] == movie_id
+    no_token_get_response = await client.get(owner_list_endpoint, params=list_params)
+    assert no_token_get_response.status_code == 404
+    no_token_get_data = no_token_get_response.json()
+    no_user_get_response = await client.get(missing_list_endpoint, params=list_params)
+    assert no_user_get_response.status_code == 404
+    assert no_user_get_response.json() == no_token_get_data
+
+
+async def test_friend_can_read_private_watchlist_after_acceptance(
+    client, database, records, rating_headers
+):
+    owner_id, movie_id = records
+    owner_username = "reviewer"
+    friend_username = "watchlist_friend"
+    list_type = "watchlist"
+    add_endpoint = f"/movies/{movie_id}/lists"
+    list_endpoint = f"/users/{owner_username}/movies"
+    list_params = {"list_type": list_type}
+
+    from app.core.tokens import create_access_token
+
+    async with database.sessions() as session, session.begin():
+        profile = Profile(user_id=owner_id, is_private=True)
+        session.add(profile)
+        friend = User(
+            username=friend_username,
+            email="watchlist.friend@example.com",
+            hashed_password="test-only",
+        )
+        session.add(friend)
+
+    second_token = create_access_token(str(friend.id))
+    second_headers = {"Authorization": f"Bearer {second_token}"}
+
+    add_response = await client.post(
+        add_endpoint, json=list_params, headers=rating_headers
+    )
+    assert add_response.status_code == 201
+
+    low_id, high_id = sorted((owner_id, friend.id))
+    async with database.sessions() as session, session.begin():
+        friendship = Friendship(
+            user_low_id=low_id,
+            user_high_id=high_id,
+            requested_by_id=owner_id,
+            status="pending",
+        )
+        session.add(friendship)
+
+    pending_response = await client.get(
+        list_endpoint, params=list_params, headers=second_headers
+    )
+    assert pending_response.status_code == 404
+
+    async with database.sessions() as session, session.begin():
+        saved_friendship = await session.get(Friendship, friendship.id)
+        assert saved_friendship is not None
+        saved_friendship.status = "accepted"
+
+    accepted_response = await client.get(
+        list_endpoint, params=list_params, headers=second_headers
+    )
+    assert accepted_response.status_code == 200
+    accepted_data = accepted_response.json()
+    assert accepted_data["total_results"] == 1
+    assert len(accepted_data["results"]) == 1
+    assert accepted_data["results"][0]["id"] == movie_id

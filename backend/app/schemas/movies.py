@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.integrations.tmdb import TMDBMovie
 
-MovieSort = Literal["release_date_asc", "release_date_desc"]
+MovieSort = Literal[
+    "release_date_asc", "release_date_desc", "rating_asc", "rating_desc"
+]
 
 
 class GenreResponse(BaseModel):

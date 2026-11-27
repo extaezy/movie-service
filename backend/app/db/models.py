@@ -51,6 +51,16 @@ class Timestamps:
     )
 
 
+class ExternalSyncState(Base):
+    __tablename__ = "external_sync_states"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    initial_sync_date: Mapped[date | None] = mapped_column(Date)
+    last_synced_date: Mapped[date | None] = mapped_column(Date)
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
@@ -318,7 +328,7 @@ class CriticReview(Base):
     original_score: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     score_scale: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     normalized_score: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
-    verdict: Mapped[str] = mapped_column(Text)
+    verdict: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     moderation_status: Mapped[str] = mapped_column(
         String(20), server_default="published"

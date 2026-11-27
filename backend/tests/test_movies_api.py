@@ -196,11 +196,6 @@ async def test_search_accepts_parameter_boundaries(
     assert movie_api.database_calls == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="BR-MOV-001: query length is validated before whitespace is trimmed",
-)
 async def test_search_validates_length_after_trimming(movies_client, movie_api):
     payload = {"page": 1, "total_pages": 0, "total_results": 0, "results": []}
     movie_api.use_upstream(lambda request: httpx.Response(200, json=payload))
@@ -450,7 +445,7 @@ async def test_catalog_is_public_and_passes_valid_parameters(
         pytest.param("year", 0, id="year-below-minimum"),
         pytest.param("year", 10000, id="year-above-maximum"),
         pytest.param("year", "invalid", id="year-text"),
-        pytest.param("sort", "rating_desc", id="unsupported-rating-sort"),
+        pytest.param("sort", "user_rating_desc", id="unsupported-user-rating-sort"),
         pytest.param("sort", "release_date", id="incomplete-sort"),
         pytest.param("sort", "", id="empty-sort"),
     ],
@@ -586,7 +581,7 @@ async def test_discover_is_public_and_translates_request_parameters(
         pytest.param("year", 0, id="year-below-minimum"),
         pytest.param("year", 10000, id="year-above-maximum"),
         pytest.param("year", "invalid", id="year-text"),
-        pytest.param("sort", "rating_desc", id="unsupported-rating-sort"),
+        pytest.param("sort", "user_rating_desc", id="unsupported-user-rating-sort"),
         pytest.param("sort", "popularity.asc", id="external-sort-name"),
         pytest.param("sort", "", id="empty-sort"),
     ],

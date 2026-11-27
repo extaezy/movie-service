@@ -35,11 +35,12 @@ async def list_movies(
     if year is not None:
         filters.append(Movie.release_date.between(date(year, 1, 1), date(year, 12, 31)))
 
-    release_order = (
-        Movie.release_date.asc()
-        if sort == "release_date_asc"
-        else Movie.release_date.desc()
-    )
+    sort_order = {
+        "release_date_asc": Movie.release_date.asc(),
+        "release_date_desc": Movie.release_date.desc(),
+        "rating_asc": Movie.tmdb_vote_average.asc(),
+        "rating_desc": Movie.tmdb_vote_average.desc(),
+    }[sort]
     offset = (page - 1) * CATALOG_PAGE_SIZE
     total_results = (
         await session.scalar(select(func.count()).select_from(Movie).where(*filters))
@@ -58,7 +59,7 @@ async def list_movies(
     movies = await session.scalars(
         select(Movie)
         .where(*filters)
-        .order_by(release_order.nulls_last(), Movie.id)
+        .order_by(sort_order.nulls_last(), Movie.id)
         .offset(offset)
         .limit(CATALOG_PAGE_SIZE)
     )

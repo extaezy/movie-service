@@ -273,7 +273,6 @@ export const MoviePage: React.FC = () => {
                     <div className={styles.criticHeader}>
                       <span className={styles.sourceName}>{crit.source}</span>
                       <span className={styles.criticName}>{crit.critic}</span>
-                      {crit.rating && <span className={styles.criticRating}>{crit.rating}</span>}
                     </div>
                     <p className={styles.reviewBody}>"{crit.excerpt}"</p>
                     <a href={crit.url} target="_blank" rel="noopener noreferrer" className={styles.readMoreLink}>

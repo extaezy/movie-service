@@ -14,10 +14,13 @@ from app.repositories.critic_review_repository import (
 )
 from app.schemas.critic_reviews import (
     CriticReviewCreate,
+    CriticReviewImport,
+    CriticReviewImportResponse,
     CriticReviewPage,
     CriticReviewResponse,
     ReviewLanguage,
 )
+from app.services.nyt_import_service import import_nyt_reviews
 
 router = APIRouter(tags=["critic_reviews"])
 DatabaseSession = Annotated[AsyncSession, Depends(get_db)]
@@ -71,6 +74,22 @@ async def post_critic_review(
     await session.commit()
     response.headers.update(PRIVATE_HEADERS)
     return review
+
+
+@router.post("/admin/critic-reviews/import", response_model=CriticReviewImportResponse)
+async def post_critic_reviews_import(
+    entry: CriticReviewImport,
+    admin: CurrentAdmin,
+    session: DatabaseSession,
+    response: Response,
+) -> CriticReviewImportResponse:
+    try:
+        result = await import_nyt_reviews(session, entry.movie_ids)
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), **PRIVATE_HEADERS}
+        raise
+    response.headers.update(PRIVATE_HEADERS)
+    return result
 
 
 @router.delete("/admin/critic-reviews/{review_id}", status_code=204)

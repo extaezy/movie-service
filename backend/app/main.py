@@ -15,12 +15,14 @@ from app.api.reviews import router as reviews_router
 from app.api.users import router as users_router
 from app.core.config import settings
 from app.db.database import engine
+from app.services.nyt_scheduler import open_nyt_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        yield
+        async with open_nyt_scheduler():
+            yield
     finally:
         await engine.dispose()
 

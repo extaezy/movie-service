@@ -21,7 +21,6 @@ export interface CriticReview {
   source: string;
   critic: string;
   excerpt: string;
-  rating?: string;
   url: string;
 }
 

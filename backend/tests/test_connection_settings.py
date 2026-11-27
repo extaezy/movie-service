@@ -31,7 +31,7 @@ def test_transaction_pooler_is_rejected():
 
 
 def test_metadata_is_scoped_to_application_schema():
-    assert len(Base.metadata.tables) == 12
+    assert len(Base.metadata.tables) == 13
     assert {table.schema for table in Base.metadata.tables.values()} == {
         "movie_service"
     }

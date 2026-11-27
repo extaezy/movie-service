@@ -21,7 +21,13 @@ from app.db.settings import BASE_DIR
 
 logger = logging.getLogger(__name__)
 
-TMDBDiscoverSort = Literal["popularity_desc", "release_date_asc", "release_date_desc"]
+TMDBDiscoverSort = Literal[
+    "popularity_desc",
+    "release_date_asc",
+    "release_date_desc",
+    "rating_asc",
+    "rating_desc",
+]
 TMDB_MAX_PAGE = 500
 
 
@@ -197,6 +203,8 @@ class TMDBClient:
             "popularity_desc": "popularity.desc",
             "release_date_asc": "primary_release_date.asc",
             "release_date_desc": "primary_release_date.desc",
+            "rating_asc": "vote_average.asc",
+            "rating_desc": "vote_average.desc",
         }
         filters: dict[str, str | int] = {"sort_by": sort_by[sort]}
         if tmdb_genre_id is not None:

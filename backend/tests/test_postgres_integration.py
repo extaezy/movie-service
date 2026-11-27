@@ -1159,7 +1159,7 @@ async def test_tables_have_rls_and_root_is_available(client, database):
                 "WHERE n.nspname='movie_service' AND c.relkind='r' AND c.relrowsecurity"
             )
         )
-        assert count == 12
+        assert count == 13
     assert (await client.get("/")).status_code == 200
 
 

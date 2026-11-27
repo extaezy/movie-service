@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from pydantic import StringConstraints
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
@@ -32,6 +33,9 @@ router = APIRouter(prefix="/movies", tags=["movies"])
 MovieId = Annotated[int, Path(ge=1, le=2147483647)]
 DatabaseSession = Annotated[AsyncSession, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+MovieSearchQuery = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
 
 
 @router.get("", response_model=MoviePage)
@@ -62,11 +66,9 @@ async def discover_movies(
 
 @router.get("/search", response_model=TMDBSearchResult, response_model_by_alias=False)
 async def search_movies(
-    q: Annotated[str, Query(min_length=1, max_length=200)],
+    q: Annotated[MovieSearchQuery, Query()],
     page: Annotated[int, Query(ge=1, le=TMDB_MAX_PAGE)] = 1,
 ):
-    if not q.strip():
-        raise HTTPException(422, "Название фильма не должно быть пустым")
     async with open_tmdb_client() as client:
         return await client.search_movies(q, page)
 

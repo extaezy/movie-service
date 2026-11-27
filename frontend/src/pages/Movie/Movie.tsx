@@ -713,22 +713,16 @@ const loadRecommendations = async () => {
               onOwnReview={restoreOwnReview}
             />
 
-            {/* Рецензии критиков */}
-            <div className={styles.card}>
-              <h3 className={styles.cardTitle}>Рецензии критиков</h3>
-              {movie.critic_reviews && movie.critic_reviews.length > 0 ? (
-                <div className={styles.reviewsList}>
-                  {movie.critic_reviews.map((crit) => (
-                    <div key={crit.id} className={styles.criticCard}>
-                      <div className={styles.criticHeader}>
-                        <span className={styles.sourceName}>{crit.source}</span>
-                        <span className={styles.criticName}>{crit.critic}</span>
-                        {crit.rating && <span className={styles.criticRating}>{crit.rating}</span>}
-                      </div>
-                      <p className={styles.reviewBody}>"{crit.excerpt}"</p>
-                      <a href={crit.url} target="_blank" rel="noopener noreferrer" className={styles.readMoreLink}>
-                        Читать полностью →
-                      </a>
+          {/* Рецензии критиков */}
+          <div className={styles.card}>
+            <h3 className={styles.cardTitle}>Рецензии критиков</h3>
+            {movie.critic_reviews && movie.critic_reviews.length > 0 ? (
+              <div className={styles.reviewsList}>
+                {movie.critic_reviews.map((crit) => (
+                  <div key={crit.id} className={styles.criticCard}>
+                    <div className={styles.criticHeader}>
+                      <span className={styles.sourceName}>{crit.source}</span>
+                      <span className={styles.criticName}>{crit.critic}</span>
                     </div>
                   ))}
                 </div>

@@ -29,13 +29,13 @@
 | Требование / условие | Основная автоматизация | Границы |
 |---|---|---|
 | FR.MOV.04; поиск, пустая выдача, границы q/page | test_search_is_public_and_uses_external_ids_without_database; test_search_returns_empty_results; test_search_accepts_parameter_boundaries; test_search_rejects_invalid_parameters_without_external_calls | HTTP API; поиск не использует БД; формат внешнего запроса отдельно проверяет test_search_sends_expected_request_and_normalizes_response |
-| API; длина q после strip | test_search_validates_length_after_trimming | Открытый BR-MOV-001, strict xfail |
+| API; длина q после strip | test_search_validates_length_after_trimming | BR-MOV-001 исправлен, отметка xfail снята |
 | FR.MOV.05–06; карточка, импорт, жанры, нормализация NULL | test_movie_import_commits_movie_genres_and_links; test_movie_import_persists_unknown_date_and_runtime | Ответ и сохранение проверяются вместе на PostgreSQL |
 | FR.MOV.06, BRULE.MOV.01–02; повторное чтение и отсутствие дублей | test_cached_movie_is_read_from_database_without_tmdb; test_movie_import_reuses_existing_genres_and_deduplicates_links | Сохранённая карточка доступна без TMDB; жанры и связи проверяются в БД |
 | FR.MOV.06; конкурентные открытия | test_concurrent_movie_imports_keep_one_card; test_concurrent_movie_imports_share_one_genre | Отдельные гонки для одной карточки и общего жанра сохранены |
 | API; неверный ID, отсутствующий фильм, отказ импорта | test_invalid_movie_ids_do_not_reach_repositories; test_unknown_local_movie_is_not_found_without_import; test_failed_movie_import_leaves_catalog_empty | 404, adult, неверный внешний ID, таймаут; отсутствие записей в БД |
 | API; атомарность импорта | test_movie_import_rolls_back_all_catalog_rows_after_database_failure | Откат фильма, жанра и связи после фактических вставок |
-| FR.MOV.01–03, частично; локальный каталог | test_catalog_is_public_and_passes_valid_parameters; test_catalog_rejects_invalid_parameters_before_repository_calls; test_catalog_filters_saved_movies_without_tmdb; test_catalog_sorts_dates_with_id_ties_and_nulls_last | Фильтры жанр/год/AND и две сортировки по дате; сортировка по рейтингу отложена |
+| FR.MOV.01–03, частично; локальный каталог | test_catalog_is_public_and_passes_valid_parameters; test_catalog_rejects_invalid_parameters_before_repository_calls; test_catalog_filters_saved_movies_without_tmdb; test_catalog_sorts_dates_with_id_ties_and_nulls_last | Фильтры жанр/год/AND и две сортировки по дате; добавленная сортировка по оценке TMDB проверяется запросами отдельно, новых автоматизированных сценариев нет |
 | API; пагинация и стабильный порядок | test_catalog_pagination_counts_at_page_boundaries; test_catalog_out_of_range_page_preserves_filtered_totals; test_catalog_keeps_stable_order_across_page_boundary | Пустая/полная/неполная страницы, выход за пределы, счётчики после фильтрации, два направления сортировки |
 | FR.MOV.01–03, частично; витрина TMDB | test_discover_is_public_and_translates_request_parameters; test_discover_rejects_invalid_parameters_without_http_or_database; test_discover_returns_empty_page_without_database | Публичность, фильтры, три поддерживаемых порядка, отсутствие БД |
 | API; предел витрины и нормализация ответа | test_discover_caps_total_pages_and_preserves_results; test_discover_ignores_unknown_upstream_fields | 499/500/501; дополнительные поля страницы и фильма проверяются вместе |
@@ -97,6 +97,6 @@
 - BR.02: для оценок остаются округление среднего, учёт оценок закрытых профилей и данные рейтинга TMDB. Для списков остаются добавление без токена, фильтрация и пагинация. Для рецензий остаются валидация текста, запросы без токена и пагинация.
 - BR.03: полный профиль, приватность и дружба требуют отдельных сценариев. /auth/me покрывает только текущую учётную запись.
 - BR.04: просмотр и администрирование профессиональных рецензий не подтверждены интеграционным сценарием.
-- FR.MOV.03: сортировка по рейтингу остаётся отложенной в текущем API.
+- FR.MOV.03: сортировка по оценке TMDB реализована в локальном каталоге и витрине; новые автоматизированные сценарии сортировки не добавлялись.
 - Нагрузочные требования, перезапуск процесса backend, сохранность Docker volume и отсутствие секретов во всех компонентах этим набором полностью не подтверждаются.
 - Frontend имеет отдельные ручные чек-листы; сборка не подтверждает прохождение пользовательских сценариев.

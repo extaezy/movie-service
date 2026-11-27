@@ -327,7 +327,6 @@ apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise
             source: 'КиноПоиск',
             critic: 'Иван Петров',
             excerpt: 'Впечатляющая визуальная составляющая и глубокая атмосфера.',
-            rating: '9/10',
             url: 'https://google.com',
           }
         ],

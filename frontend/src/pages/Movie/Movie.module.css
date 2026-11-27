@@ -453,14 +453,6 @@ a.genreTag:focus-visible {
   font-size: 12px;
   color: #9ca3af;
 }
-.criticRating {
-  background-color: #fbbf24;
-  color: #0f0f14;
-  font-weight: 700;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
 .reviewBody {
   font-size: 14px;
   color: #d1d5db;

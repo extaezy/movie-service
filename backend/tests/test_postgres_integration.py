@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
 from uuid import uuid4
@@ -16,6 +16,7 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models import (
+    AuthSession,
     Base,
     Critic,
     CriticReview,
@@ -31,6 +32,7 @@ from app.db.models import (
     UserReview,
 )
 from app.integrations.tmdb import open_tmdb_client
+from app.repositories.auth_session_repository import create_auth_session
 
 TEST_DATABASE_URL = os.getenv("MOVIE_SERVICE_TEST_DATABASE_URL")
 pytestmark = [
@@ -77,7 +79,8 @@ async def clean_database(database):
 @pytest_asyncio.fixture(loop_scope="module")
 async def client(database):
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=database.app), base_url="http://test"
+        transport=httpx.ASGITransport(app=database.app), base_url="http://test",
+        headers={"X-Auth-Request": "1"},
     ) as value:
         yield value
 
@@ -881,12 +884,17 @@ async def records(database):
         return user.id, movie.id
 
 
-@pytest.fixture
-def rating_headers(records):
+@pytest_asyncio.fixture(loop_scope="module")
+async def rating_headers(records, database):
     from app.core.tokens import create_access_token
 
     user_id, _ = records
-    token = create_access_token(str(user_id))
+    async with database.sessions() as session, session.begin():
+        auth_session = AuthSession(
+            user_id=user_id, expires_at=datetime.now(UTC) + timedelta(days=7)
+        )
+        session.add(auth_session)
+    token = create_access_token(str(user_id), str(auth_session.id))
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -997,7 +1005,9 @@ async def test_rating_api_keeps_users_ratings_independent(
             hashed_password="test-only",
         )
         session.add(second_user)
-    second_token = create_access_token(str(second_user.id))
+    async with database.sessions() as session:
+        auth_session, _ = await create_auth_session(session, second_user.id)
+    second_token = create_access_token(str(second_user.id), str(auth_session.id))
     second_headers = {"Authorization": f"Bearer {second_token}"}
     endpoint = f"/movies/{movie_id}/rating"
 
@@ -1159,7 +1169,7 @@ async def test_tables_have_rls_and_root_is_available(client, database):
                 "WHERE n.nspname='movie_service' AND c.relkind='r' AND c.relrowsecurity"
             )
         )
-        assert count == 13
+        assert count == 15
     assert (await client.get("/")).status_code == 200
 
 
@@ -1871,7 +1881,9 @@ async def test_another_user_cannot_update_or_delete_review(
         )
         session.add(second_user)
 
-    second_token = create_access_token(str(second_user.id))
+    async with database.sessions() as session:
+        auth_session, _ = await create_auth_session(session, second_user.id)
+    second_token = create_access_token(str(second_user.id), str(auth_session.id))
     second_headers = {"Authorization": f"Bearer {second_token}"}
 
     patch_response = await client.patch(
@@ -1972,7 +1984,9 @@ async def test_friend_can_read_private_watchlist_after_acceptance(
         )
         session.add(friend)
 
-    second_token = create_access_token(str(friend.id))
+    async with database.sessions() as session:
+        auth_session, _ = await create_auth_session(session, friend.id)
+    second_token = create_access_token(str(friend.id), str(auth_session.id))
     second_headers = {"Authorization": f"Bearer {second_token}"}
 
     add_response = await client.post(

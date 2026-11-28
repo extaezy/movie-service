@@ -44,7 +44,8 @@ async def test_database_auth_with_rollback():
             app.dependency_overrides[get_db] = test_session
             try:
                 async with httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=app), base_url="http://test"
+                    transport=httpx.ASGITransport(app=app), base_url="http://test",
+                    headers={"X-Auth-Request": "1"},
                 ) as client:
                     response = await client.post("/auth/register", json=registration)
                     assert response.status_code == 201

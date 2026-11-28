@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -35,6 +35,18 @@ def auth_api(monkeypatch, token_context, auth_password_hash):
     monkeypatch.setattr(auth_service, "get_user_by_username", get_by_username)
     monkeypatch.setattr(auth_service, "get_user_by_email", get_by_email)
     monkeypatch.setattr(dependencies, "get_user_by_id", get_by_id)
+    auth_session = SimpleNamespace(
+        id=token_context.session_id,
+        expires_at=datetime.now(UTC) + timedelta(days=7),
+    )
+    monkeypatch.setattr(
+        auth_service,
+        "create_auth_session",
+        AsyncMock(return_value=(auth_session, "local-refresh-placeholder")),
+    )
+    monkeypatch.setattr(
+        dependencies, "get_active_auth_session", AsyncMock(return_value=auth_session)
+    )
 
     async def offline_database():
         yield session
@@ -55,7 +67,9 @@ def auth_api(monkeypatch, token_context, auth_password_hash):
 @pytest_asyncio.fixture
 async def auth_client(auth_api):
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=auth_api.app), base_url="http://test"
+        transport=httpx.ASGITransport(app=auth_api.app),
+        base_url="http://test",
+        headers={"X-Auth-Request": "1"},
     ) as client:
         yield client
 
@@ -142,9 +156,7 @@ async def test_login_rejects_invalid_field_types_without_repository_calls(
     auth_api.get_by_email.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "unknown_identifier", ["unknown@example.com", "invalid@"]
-)
+@pytest.mark.parametrize("unknown_identifier", ["unknown@example.com", "invalid@"])
 async def test_unknown_user_and_wrong_password_have_same_unauthorized_response(
     auth_client, auth_api, unknown_identifier
 ):

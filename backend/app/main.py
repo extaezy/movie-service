@@ -42,6 +42,14 @@ app.include_router(reviews_router)
 app.include_router(users_router)
 
 
+@app.middleware("http")
+async def prevent_auth_caching(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path in {"/auth/login", "/auth/refresh", "/auth/logout"}:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_request_validation_error(
     request: Request, exc: RequestValidationError

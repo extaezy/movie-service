@@ -89,6 +89,33 @@ class User(Base):
     )
 
 
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (Index("ix_auth_sessions_user_id", "user_id"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.users.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    __table_args__ = (Index("ix_refresh_tokens_session_id", "session_id"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.auth_sessions.id", ondelete="CASCADE")
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Profile(Base):
     __tablename__ = "profiles"
     __table_args__ = (

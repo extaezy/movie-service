@@ -227,7 +227,8 @@ async def outage_service(
                 ),
             )
             async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://test"
+                transport=httpx.ASGITransport(app=app), base_url="http://test",
+                    headers={"X-Auth-Request": "1"},
             ) as client:
                 registration = {
                     "username": "outage_user",

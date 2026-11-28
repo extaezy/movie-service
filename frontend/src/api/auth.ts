@@ -1,4 +1,6 @@
-import { httpClient } from './httpClient';
+import {
+  authHttpClient, changeAuthSession, getAccessToken, httpClient, withAuthLock,
+} from './httpClient';
 import type { CurrentUser } from '../types';
 
 export interface LoginCredentials {
@@ -24,8 +26,21 @@ export interface TokenResponse {
 }
 
 export const loginApi = async (data: LoginCredentials): Promise<TokenResponse> => {
-  const response = await httpClient.post<TokenResponse>('/auth/login', data);
-  return response.data;
+  return withAuthLock(async () => {
+    const response = await authHttpClient.post<TokenResponse>('/auth/login', data);
+    changeAuthSession(response.data.access_token);
+    return response.data;
+  });
+};
+
+export const logoutApi = async (): Promise<void> => {
+  await withAuthLock(async () => {
+    const token = getAccessToken();
+    await authHttpClient.post('/auth/logout', undefined, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    changeAuthSession(null);
+  });
 };
 
 export const getCurrentUserApi = async (token: string): Promise<CurrentUser> => {

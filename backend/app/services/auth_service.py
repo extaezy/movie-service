@@ -5,6 +5,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.security import hash_password, verify_password
 from app.core.tokens import create_access_token
+from app.repositories.auth_session_repository import create_auth_session
 from app.repositories.user_repository import (
     UserAlreadyExistsError,
     create_user,
@@ -54,7 +55,14 @@ async def authenticate_user(user: UserLogin, session: AsyncSession):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return {
-        "access_token": create_access_token(str(existing_user.id)),
-        "token_type": "bearer",
-    }
+    auth_session, refresh = await create_auth_session(session, existing_user.id)
+    return (
+        {
+            "access_token": create_access_token(
+                str(existing_user.id), str(auth_session.id), auth_session.expires_at
+            ),
+            "token_type": "bearer",
+        },
+        refresh,
+        auth_session.expires_at,
+    )

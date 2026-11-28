@@ -21,7 +21,7 @@
 | API; пароль не нормализуется | test_login_does_not_trim_password | Пробел в начале и конце |
 | NFR.SEC.02; текущая учётная запись | test_me_returns_token_owner; test_me_rejects_unknown_token_owner | Два владельца проверяются с PostgreSQL; отсутствующий UUID — на API с подменённым чтением |
 | NFR.SEC.05; недействительный токен | test_me_rejects_missing_or_malformed_credentials_without_lookup; test_me_rejects_invalid_jwt_before_user_lookup | 4 варианта заголовка и 9 вариантов JWT; HTTP 401 и WWW-Authenticate |
-| FR.AUTH.05 | Отложено в API | Logout и отзыв JWT не реализованы |
+| FR.AUTH.05 | Проверка на временной локальной PostgreSQL без добавления тестовых файлов | Logout, ротация refresh, повторное предъявление, фиксированный срок и независимость устройств; существующие auth-фикстуры актуализированы под sid |
 | FR.USER.01 | Только /auth/me | Проверка полного профиля сюда не входит |
 
 ## Фильмы и внешняя интеграция

@@ -1,10 +1,25 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import styles from './Header.module.css';
+import { getApiErrorMessage } from '../../api/errors';
 
 export const Header: React.FC = () => {
   const { user, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setLogoutError('');
+    try {
+      await logout();
+    } catch (error) {
+      setLogoutError(getApiErrorMessage(error, 'Не удалось выйти. Повторите попытку.'));
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <header className={styles.header}>
@@ -34,9 +49,10 @@ export const Header: React.FC = () => {
                 />
                 <span className={styles.username}>{user.display_name || user.username}</span>
               </Link>
-              <button onClick={logout} className={styles.logoutBtn} title="Выйти">
-                Выйти
+              <button onClick={handleLogout} disabled={loggingOut} className={styles.logoutBtn} title="Выйти">
+                {loggingOut ? 'Выходим…' : 'Выйти'}
               </button>
+              {logoutError && <span role="alert">{logoutError}</span>}
             </>
           ) : (
             <Link to="/login" className={styles.loginBtn}>

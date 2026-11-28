@@ -724,6 +724,9 @@ const loadRecommendations = async () => {
                       <span className={styles.sourceName}>{crit.source}</span>
                       <span className={styles.criticName}>{crit.critic}</span>
                     </div>
+                    <p>{crit.excerpt}</p>
+                    <a href={crit.url} target="_blank" rel="noopener noreferrer">Читать рецензию</a>
+                  </div>
                   ))}
                 </div>
               ) : (

@@ -92,16 +92,19 @@ def token_context(monkeypatch):
 
     monkeypatch.setattr(tokens.settings, "jwt_secret_key", SecretStr(secret))
     user_id = uuid4()
+    session_id = uuid4()
     creation_started_at = int(datetime.now(UTC).timestamp())
-    valid_token = tokens.create_access_token(str(user_id))
+    valid_token = tokens.create_access_token(str(user_id), str(session_id))
     return SimpleNamespace(
         tokens=tokens,
         secret=secret,
         user_id=user_id,
+        session_id=session_id,
         valid_token=valid_token,
         creation_started_at=creation_started_at,
         claims={
             "sub": str(user_id),
+            "sid": str(session_id),
             "iat": creation_started_at,
             "exp": creation_started_at + 1800,
         },

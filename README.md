@@ -16,6 +16,8 @@
 
 Регистрация, вход и `/auth/me` используют PostgreSQL через `backend/app/repositories/user_repository.py`. Пользователь и профиль создаются одной транзакцией. Словаря пользователей в памяти и резервного хранения без БД нет. Подключение и ключ JWT задаются в `backend/.env` по образцу `backend/.env.example`.
 
+Авторизация: access JWT живёт до 30 минут, refresh и сессия — фиксированные 7 дней от входа. Refresh передаётся только в HttpOnly cookie и заменяется при каждом `/auth/refresh`; `/auth/logout` немедленно отзывает сессию, другие устройства остаются авторизованными. Frontend хранит access в памяти и восстанавливает вход через refresh после перезагрузки. Примените миграцию `20261128_0005`; старые JWT без sid потребуют повторного входа. Для локального HTTP используйте `AUTH_COOKIE_SECURE=false`, для production HTTPS — `true`; `AUTH_ALLOWED_ORIGINS` задаёт допустимые адреса frontend. Cookie-операции login/refresh/logout требуют `X-Auth-Request: 1`, frontend добавляет его автоматически. Подробности — в `docs/api.md`.
+
 ## Проверка backend
 
 Команды PowerShell из каталога `backend` с установленными зависимостями:
